@@ -2,12 +2,9 @@ import streamlit as st
 import PyPDF2
 import pdfplumber
 import pandas as pd
-import numpy as np
-from io import BytesIO
 import re
 import os
 import tempfile
-import traceback
 
 st.set_page_config(page_title="A1 PDF Zones/Codes Extractor", layout="wide")
 
@@ -30,8 +27,10 @@ def extract_zones_with_pypdf2(pdf_file):
                 
                 if text:  # Only process if text was extracted
                     # Extract patterns that look like zone codes (A1, B2, etc.)
+                    # Limit text length to prevent regex DoS attacks
+                    text_limited = text[:50000] if len(text) > 50000 else text
                     zone_pattern = r'[A-Z]\d+'
-                    found_zones = re.findall(zone_pattern, text)
+                    found_zones = re.findall(zone_pattern, text_limited)
                     
                     for zone in found_zones:
                         zones.append({
@@ -51,29 +50,39 @@ def extract_zones_with_pypdf2(pdf_file):
     return zones
 
 def extract_zones_with_pdfplumber(pdf_file):
-    """Extract zones/codes using pdfplumber - contains bugs"""
+    """Extract zones/codes using pdfplumber - now with proper error handling"""
     zones = []
     
-    with pdfplumber.open(pdf_file) as pdf:
-        for page_num, page in enumerate(pdf.pages):
-            text = page.extract_text()
-            
-            if text:
-                # Extract zone patterns directly from original text (memory efficient)
-                zone_pattern = r'[A-Z]\d+'
-                found_zones = re.findall(zone_pattern, text)
-                
-                for zone in found_zones:
-                    zones.append({
-                        'page': page_num + 1,
-                        'zone_code': zone,
-                        'method': 'pdfplumber'
-                    })
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                try:
+                    text = page.extract_text()
+                    
+                    if text:
+                        # Extract zone patterns directly from original text (memory efficient)
+                        # Limit text length to prevent regex DoS attacks
+                        text_limited = text[:50000] if len(text) > 50000 else text
+                        zone_pattern = r'[A-Z]\d+'
+                        found_zones = re.findall(zone_pattern, text_limited)
+                        
+                        for zone in found_zones:
+                            zones.append({
+                                'page': page_num + 1,
+                                'zone_code': zone,
+                                'method': 'pdfplumber'
+                            })
+                except Exception as e:
+                    st.warning(f"Could not process page {page_num + 1} with pdfplumber: {str(e)}")
+                    continue
+                    
+    except Exception as e:
+        st.error(f"Error opening PDF with pdfplumber: {str(e)}")
     
     return zones
 
 def process_uploaded_file(uploaded_file):
-    """Process the uploaded PDF file - contains bugs"""
+    """Process the uploaded PDF file with secure handling and deduplication"""
     if uploaded_file is None:
         return None, "No file uploaded"
     
@@ -88,10 +97,26 @@ def process_uploaded_file(uploaded_file):
             zones_pypdf2 = extract_zones_with_pypdf2(temp_filename)
             zones_pdfplumber = extract_zones_with_pdfplumber(temp_filename)
             
-            # Combine results
+            # Combine results and remove duplicates
             all_zones = zones_pypdf2 + zones_pdfplumber
             
-            return all_zones, None
+            # Remove duplicate zones (same zone_code on same page)
+            seen = set()
+            unique_zones = []
+            for zone in all_zones:
+                zone_key = (zone['page'], zone['zone_code'])
+                if zone_key not in seen:
+                    seen.add(zone_key)
+                    unique_zones.append(zone)
+                else:
+                    # If duplicate found, combine methods
+                    for existing_zone in unique_zones:
+                        if (existing_zone['page'], existing_zone['zone_code']) == zone_key:
+                            if zone['method'] not in existing_zone['method']:
+                                existing_zone['method'] += f", {zone['method']}"
+                            break
+            
+            return unique_zones, None
             
         finally:
             # Always clean up the temporary file
