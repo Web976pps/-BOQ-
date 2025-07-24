@@ -1,4 +1,5 @@
 """CLI entry point for A1 PDF zones & codes extraction."""
+
 from __future__ import annotations
 
 import argparse
@@ -6,32 +7,29 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
 
 from loguru import logger
 
-from utils.config import load_config
-from pdf_code_extractor import (
-    SpatialCfg,
-    to_px,
-    to_mm,
-)
-from pdf_code_extractor.raster import pdf_to_pngs
-from pdf_code_extractor.preprocess import load_and_enhance
-from pdf_code_extractor.ocr_zones import detect as detect_zones
-from pdf_code_extractor.ocr_codes import detect as detect_codes
-from pdf_code_extractor.spatial import assign
-from pdf_code_extractor.normalize import apply as normalize_apply
-from pdf_code_extractor.validate import run as validate_run
 from pdf_code_extractor.export import write_csvs, write_overlays
+from pdf_code_extractor.normalize import apply as normalize_apply
+from pdf_code_extractor.ocr_codes import detect as detect_codes
+from pdf_code_extractor.ocr_zones import detect as detect_zones
+from pdf_code_extractor.preprocess import load_and_enhance
+from pdf_code_extractor.raster import pdf_to_pngs
+from pdf_code_extractor.spatial import assign
+from pdf_code_extractor.validate import run as validate_run
+from utils.config import load_config
 from utils.logging import setup_logging
-
 
 # ---------------------------------------------------------------------------
 # Core processing
 # ---------------------------------------------------------------------------
 
-def process_pdfs(pdf_paths: List[Path], output_dir: Path, cfg_path: str | None = None) -> Dict[str, Any]:  # noqa: D401
+
+def process_pdfs(
+    pdf_paths: list[Path], output_dir: Path, cfg_path: str | None = None
+) -> dict[str, Any]:  # noqa: D401
     config = load_config(cfg_path)
     setup_logging(json_logging=False, level="INFO")
 
@@ -40,15 +38,17 @@ def process_pdfs(pdf_paths: List[Path], output_dir: Path, cfg_path: str | None =
 
     temp_dir = Path(tempfile.mkdtemp(prefix="extract_")).resolve()
 
-    zones: List[Dict[str, Any]] = []
-    codes: List[Dict[str, Any]] = []
-    page_images: Dict[int, Path] = {}
+    zones: list[dict[str, Any]] = []
+    codes: list[dict[str, Any]] = []
+    page_images: dict[int, Path] = {}
 
     page_counter = 1
     for pdf_path in pdf_paths:
         logger.info(f"Processing PDF: {pdf_path}")
         raster_dir = temp_dir / pdf_path.stem
-        page_pngs = pdf_to_pngs(pdf_path, raster_dir, dpi=config.raster.dpi, engine=config.raster.engine)
+        page_pngs = pdf_to_pngs(
+            pdf_path, raster_dir, dpi=config.raster.dpi, engine=config.raster.engine
+        )
 
         for local_page_num, png_path in page_pngs:
             global_page_num = page_counter
@@ -80,10 +80,14 @@ def process_pdfs(pdf_paths: List[Path], output_dir: Path, cfg_path: str | None =
 
     # Persist report
     with (out_dir / "qa_report.json").open("w", encoding="utf-8") as fh:
-        json.dump({
-            "spatial": spatial_report.to_dict(),
-            "validation": validation_report,
-        }, fh, indent=2)
+        json.dump(
+            {
+                "spatial": spatial_report.to_dict(),
+                "validation": validation_report,
+            },
+            fh,
+            indent=2,
+        )
 
     logger.info("Extraction completed")
     shutil.rmtree(temp_dir, ignore_errors=True)
@@ -98,10 +102,13 @@ def process_pdfs(pdf_paths: List[Path], output_dir: Path, cfg_path: str | None =
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def make_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Extract A1 drawing zones & codes from PDFs.")
     parser.add_argument("pdf", nargs="+", help="Input PDF file(s)")
-    parser.add_argument("--out", "-o", default="output", help="Output directory for CSVs & overlays")
+    parser.add_argument(
+        "--out", "-o", default="output", help="Output directory for CSVs & overlays"
+    )
     parser.add_argument("--config", "-c", help="Path to YAML config file")
     return parser
 
@@ -117,4 +124,4 @@ def main() -> None:  # noqa: D401
 
 
 if __name__ == "__main__":
-    main() 
+    main()

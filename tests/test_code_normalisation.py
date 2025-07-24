@@ -10,4 +10,4 @@ def test_normalise_code_variants() -> None:
     }
     for raw, expected in cases.items():
         norm, _ = normalise_code(raw)
-        assert norm == expected 
+        assert norm == expected

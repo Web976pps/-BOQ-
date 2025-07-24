@@ -8,7 +8,11 @@ from typing import Literal
 from loguru import logger
 
 
-def setup_logging(*, json_logging: bool = False, level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO") -> None:  # noqa: D401
+def setup_logging(
+    *,
+    json_logging: bool = False,
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
+) -> None:  # noqa: D401
     """Configure global *loguru* logger.
 
     Parameters
@@ -29,4 +33,4 @@ def setup_logging(*, json_logging: bool = False, level: Literal["DEBUG", "INFO",
         serialize=json_logging,
         backtrace=False,
         diagnose=False,
-    ) 
+    )

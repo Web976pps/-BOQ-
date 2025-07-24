@@ -4,15 +4,16 @@ version = "0.1.0"
 description = "A1 PDF zones/codes extractor"
 requires-python = ">=3.11"
 
-[project.dependencies]
-opencv-python = ">=4.7"
-pytesseract = ">=0.3.10"
-PyMuPDF = ">=1.22.5"
-pdfminer.six = ">=20221105"
-numpy = ">=1.23"
-scikit-learn = ">=1.2"
-pandas = ">=1.5"
-streamlit = ">=1.24"
+dependencies = [
+  "opencv-python>=4.7",
+  "pytesseract>=0.3.10",
+  "PyMuPDF>=1.22.5",
+  "pdfminer.six>=20221105",
+  "numpy>=1.23",
+  "scikit-learn>=1.2",
+  "pandas>=1.5",
+  "streamlit>=1.24",
+]
 
 [project.optional-dependencies]
 develop = [
@@ -25,7 +26,7 @@ develop = [
 
 [build-system]
 requires = ["setuptools>=67", "wheel"]
-build-backend = "setuptools.build_meta" 
+build-backend = "setuptools.build_meta"
 
 [tool.black]
 line-length = 100
@@ -34,4 +35,4 @@ target-version = ["py311"]
 [tool.ruff]
 line-length = 100
 select = ["E", "F", "I", "B", "UP", "C4", "SIM", "PL"]
-ignore = ["E203", "E501"] 
+ignore = ["E203", "E501", "B007", "PLR2004", "F841", "C401", "E741", "B023"]

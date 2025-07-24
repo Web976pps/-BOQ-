@@ -1,4 +1,3 @@
-import re
 from pdf_code_extractor.ocr_codes import _CODE_PATTERN
 
 
@@ -21,4 +20,4 @@ def test_regex_rejects_invalid():
         "TB--",
     ]
     for s in invalid:
-        assert not _CODE_PATTERN.search(s) 
+        assert not _CODE_PATTERN.search(s)

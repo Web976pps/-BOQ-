@@ -1,1 +1,1 @@
-"""Utility helpers for the A1 PDF extractor.""" 
+"""Utility helpers for the A1 PDF extractor."""

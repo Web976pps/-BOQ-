@@ -1,5 +1,4 @@
-from pdf_code_extractor.spatial import assign, SpatialCfg, DBSCANCfg, to_px
-
+from pdf_code_extractor.spatial import DBSCANCfg, SpatialCfg, assign
 
 # Synthetic zone and code fixtures
 ZONE_1 = {"page": 1, "bbox": (100, 100, 50, 20), "conf": 80.0, "zone": "A"}
@@ -46,4 +45,4 @@ def test_determinism():
     cfg = SpatialCfg(strategy="dbscan", dbscan=DBSCANCfg(eps_mm=10))
     a1, _ = assign(zones, codes, cfg)
     a2, _ = assign(zones, codes, cfg)
-    assert [c.zone for c in a1] == [c.zone for c in a2] 
+    assert [c.zone for c in a1] == [c.zone for c in a2]

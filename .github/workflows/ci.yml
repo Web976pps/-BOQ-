@@ -19,4 +19,4 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
       - name: Lint & test
-        run: pytest -q 
+        run: pytest -q

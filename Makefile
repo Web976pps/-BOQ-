@@ -33,4 +33,4 @@ docker-run:
 	    --config /work/config/default.yml
 
 clean:
-	rm -rf outputs/* 
+	rm -rf outputs/*

@@ -1,5 +1,5 @@
-import numpy as np
 import cv2
+import numpy as np
 
 from pdf_code_extractor.preprocess import _deskew
 
@@ -13,4 +13,4 @@ def test_deskew_preserves_shape() -> None:
 
     deskewed = _deskew(rotated)
 
-    assert deskewed.shape == rotated.shape 
+    assert deskewed.shape == rotated.shape

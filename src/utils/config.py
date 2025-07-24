@@ -66,4 +66,4 @@ def load_config(yml_path: str | Path | None = None) -> AppConfig:  # noqa: D401
     with path.open("r", encoding="utf-8") as fh:
         payload = yaml.safe_load(fh) or {}
 
-    return AppConfig(**payload) 
+    return AppConfig(**payload)

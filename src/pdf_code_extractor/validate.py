@@ -1,8 +1,9 @@
 """Validation utilities for spatial assignments and code extraction quality."""
+
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from typing import List, Dict, Any
+from collections import defaultdict
+from typing import Any
 
 import numpy as np
 from loguru import logger
@@ -10,7 +11,9 @@ from loguru import logger
 __all__ = ["run"]
 
 
-def run(rows: List[Dict[str, Any]], zones: List[Dict[str, Any]], cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:  # noqa: D401
+def run(
+    rows: list[dict[str, Any]], zones: list[dict[str, Any]], cfg: dict[str, Any] | None = None
+) -> dict[str, Any]:  # noqa: D401
     """Produce validation summary.
 
     Parameters
@@ -24,7 +27,9 @@ def run(rows: List[Dict[str, Any]], zones: List[Dict[str, Any]], cfg: Dict[str, 
     """
 
     # Zones without codes
-    zone_names_with_codes = {r["zone"] for r in rows if r.get("zone") and r["zone"] != "__UNASSIGNED__"}
+    zone_names_with_codes = {
+        r["zone"] for r in rows if r.get("zone") and r["zone"] != "__UNASSIGNED__"
+    }
     all_zone_names = {z["zone"] for z in zones}
 
     zones_without_codes = sorted(all_zone_names - zone_names_with_codes)
@@ -58,4 +63,4 @@ def run(rows: List[Dict[str, Any]], zones: List[Dict[str, Any]], cfg: Dict[str, 
         f"Validation » zones_without_codes={len(zones_without_codes)} unassigned={len(unassigned_codes)} conflicts={len(conflicts)}"
     )
 
-    return report 
+    return report

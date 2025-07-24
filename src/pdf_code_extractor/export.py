@@ -1,13 +1,13 @@
 """CSV and overlay export utilities."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
 
 import cv2
 import pandas as pd
 from loguru import logger
-from importlib import resources
 
 __all__ = ["write_csvs", "write_overlays"]
 
@@ -20,7 +20,7 @@ VERSION_FILE = Path(__file__).resolve().parents[2] / "VERSION"
 VERSION_STR = VERSION_FILE.read_text().strip() if VERSION_FILE.exists() else "0.0.0"
 
 
-def write_csvs(rows: List[Dict[str, Any]], output_dir: str | Path) -> None:  # noqa: D401
+def write_csvs(rows: list[dict[str, Any]], output_dir: str | Path) -> None:  # noqa: D401
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -43,7 +43,10 @@ def write_csvs(rows: List[Dict[str, Any]], output_dir: str | Path) -> None:  # n
 
     # Zone-prefix summary
     zp_summary = (
-        unique.groupby(["zone", "prefix"]).size().reset_index(name="count").sort_values(["zone", "prefix"])
+        unique.groupby(["zone", "prefix"])
+        .size()
+        .reset_index(name="count")
+        .sort_values(["zone", "prefix"])
     )
     _write(zp_summary, "zone_prefix_summary.csv")
 
@@ -58,6 +61,7 @@ def write_csvs(rows: List[Dict[str, Any]], output_dir: str | Path) -> None:  # n
 # Overlays
 # ---------------------------------------------------------------------------
 
+
 def _draw_bbox(img, bbox, color, label: str | None = None):
     x, y, w, h = map(int, bbox)
     cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
@@ -65,7 +69,12 @@ def _draw_bbox(img, bbox, color, label: str | None = None):
         cv2.putText(img, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
 
-def write_overlays(rows: List[Dict[str, Any]], zones: List[Dict[str, Any]], page_images: Dict[int, str | Path], output_dir: str | Path) -> None:  # noqa: D401
+def write_overlays(
+    rows: list[dict[str, Any]],
+    zones: list[dict[str, Any]],
+    page_images: dict[int, str | Path],
+    output_dir: str | Path,
+) -> None:  # noqa: D401
     """Draw code and zone bounding boxes on page images and save PNG overlays."""
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -93,4 +102,4 @@ def write_overlays(rows: List[Dict[str, Any]], zones: List[Dict[str, Any]], page
         out_file = out_dir / f"overlay_page_{page:04d}.png"
         cv2.imwrite(str(out_file), img)
 
-    logger.info(f"Exports » Overlay images written to {out_dir}") 
+    logger.info(f"Exports » Overlay images written to {out_dir}")

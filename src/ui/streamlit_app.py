@@ -1,9 +1,10 @@
 # path: src/ui/streamlit_app.py
-import streamlit as st
+import subprocess
 import tempfile
 from pathlib import Path
+
 import pandas as pd
-import subprocess
+import streamlit as st
 
 st.set_page_config(page_title="-BOQ- Zones/Codes Extractor", layout="wide")
 st.title("A1 PDF Zones/Codes Extractor (-BOQ-)")
@@ -20,15 +21,20 @@ if run_btn and uploaded:
         out_dir.mkdir(exist_ok=True)
 
         cmd = [
-            "python", "-m", "src.extract_zones_codes",
-            "--pdf", str(pdf_path),
-            "--out", str(out_dir),
-            "--config", "config/default.yml",
+            "python",
+            "-m",
+            "src.extract_zones_codes",
+            "--pdf",
+            str(pdf_path),
+            "--out",
+            str(out_dir),
+            "--config",
+            "config/default.yml",
         ]
         st.write("Running:", " ".join(cmd))
         subprocess.run(cmd, check=True)
 
-        row_csv  = out_dir / "row_level_instances.csv"
+        row_csv = out_dir / "row_level_instances.csv"
         uniq_csv = out_dir / "unique_zone_codes.csv"
         zone_csv = out_dir / "zone_prefix_summary.csv"
         glob_csv = out_dir / "global_prefix_summary.csv"
@@ -36,15 +42,31 @@ if run_btn and uploaded:
         tabs = st.tabs(["Instances", "Unique", "Zone x Prefix", "Global Prefix"])
         with tabs[0]:
             st.dataframe(pd.read_csv(row_csv))
-            st.download_button("Download row_level_instances.csv", data=row_csv.read_bytes(), file_name=row_csv.name)
+            st.download_button(
+                "Download row_level_instances.csv",
+                data=row_csv.read_bytes(),
+                file_name=row_csv.name,
+            )
         with tabs[1]:
             st.dataframe(pd.read_csv(uniq_csv))
-            st.download_button("Download unique_zone_codes.csv", data=uniq_csv.read_bytes(), file_name=uniq_csv.name)
+            st.download_button(
+                "Download unique_zone_codes.csv",
+                data=uniq_csv.read_bytes(),
+                file_name=uniq_csv.name,
+            )
         with tabs[2]:
             st.dataframe(pd.read_csv(zone_csv))
-            st.download_button("Download zone_prefix_summary.csv", data=zone_csv.read_bytes(), file_name=zone_csv.name)
+            st.download_button(
+                "Download zone_prefix_summary.csv",
+                data=zone_csv.read_bytes(),
+                file_name=zone_csv.name,
+            )
         with tabs[3]:
             st.dataframe(pd.read_csv(glob_csv))
-            st.download_button("Download global_prefix_summary.csv", data=glob_csv.read_bytes(), file_name=glob_csv.name)
+            st.download_button(
+                "Download global_prefix_summary.csv",
+                data=glob_csv.read_bytes(),
+                file_name=glob_csv.name,
+            )
 
-        # TODO: optionally serve overlay PNGs if generated 
+        # TODO: optionally serve overlay PNGs if generated

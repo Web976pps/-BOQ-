@@ -1,0 +1,18 @@
+raster:
+  dpi: 300                # PNG resolution
+  engine: auto            # pdftoppm | ghostscript | pymupdf | auto
+
+preprocess:
+  clahe_clip: 2.0         # CLAHE contrast limit
+  clahe_grid: 8           # CLAHE grid size
+  adaptive_block_size: 51 # Adaptive threshold block size (odd)
+  adaptive_C: 2           # Adaptive threshold C
+  deskew: true            # Deskew pages
+
+spatial:
+  strategy: dbscan        # dbscan | voronoi
+  max_assign_dist_mm: 500 # Fallback nearest-zone distance (mm)
+  zone_buffer_mm: 50      # Dilate zone polygons (mm)
+  dbscan:
+    eps_mm: 150           # Cluster radius (mm)
+    min_samples: 1        # DBSCAN min samples 

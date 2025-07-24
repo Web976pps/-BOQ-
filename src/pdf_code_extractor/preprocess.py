@@ -24,6 +24,7 @@ class PreprocessCfg:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _deskew(image: np.ndarray) -> np.ndarray:
     coords = np.column_stack(np.where(image < 255))
     if coords.size == 0:
@@ -36,7 +37,9 @@ def _deskew(image: np.ndarray) -> np.ndarray:
     (h, w) = image.shape[:2]
     center = (w // 2, h // 2)
     M = cv2.getRotationMatrix2D(center, angle, 1.0)
-    rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    rotated = cv2.warpAffine(
+        image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+    )
 
     logger.debug(f"Deskewed by {angle:.2f}°")
     return rotated
@@ -46,7 +49,10 @@ def _deskew(image: np.ndarray) -> np.ndarray:
 # Public API
 # ---------------------------------------------------------------------------
 
-def load_and_enhance(img_path: str | Path, cfg: PreprocessCfg | dict[str, Any] | None = None) -> np.ndarray:  # noqa: D401
+
+def load_and_enhance(
+    img_path: str | Path, cfg: PreprocessCfg | dict[str, Any] | None = None
+) -> np.ndarray:  # noqa: D401
     """Load image at *img_path* and apply preprocessing pipeline."""
 
     if cfg is None:
@@ -79,4 +85,4 @@ def load_and_enhance(img_path: str | Path, cfg: PreprocessCfg | dict[str, Any] |
     if cfg.deskew:
         binary = _deskew(binary)
 
-    return binary 
+    return binary

@@ -23,4 +23,4 @@ def test_validate_summary():
     uniq = norm_apply(rows)
     report = validate_run(uniq, zones, None)
     assert "A" not in report["zones_without_codes"]
-    assert "C3" in report["unassigned_codes"] 
+    assert "C3" in report["unassigned_codes"]

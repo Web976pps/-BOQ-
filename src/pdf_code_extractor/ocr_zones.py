@@ -3,13 +3,12 @@
 Detects ALL-CAPS text (e.g., drawing zones) and returns bounding-boxes with
 confidence scores.
 """
+
 from __future__ import annotations
 
-import statistics
 from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Any
+from typing import Any
 
-import cv2
 import numpy as np
 import pytesseract
 from loguru import logger
@@ -43,7 +42,10 @@ def _is_all_caps(token: str) -> bool:
 # Public API
 # ---------------------------------------------------------------------------
 
-def detect(img: np.ndarray, page_num: int, cfg: ZonesCfg | None = None) -> List[Dict[str, Any]]:  # noqa: D401
+
+def detect(
+    img: np.ndarray, page_num: int, cfg: ZonesCfg | None = None
+) -> list[dict[str, Any]]:  # noqa: D401
     """Detect ALL-CAPS zones in *img*.
 
     Returns list of dicts with: page, bbox(x,y,w,h), conf, zone
@@ -62,7 +64,7 @@ def detect(img: np.ndarray, page_num: int, cfg: ZonesCfg | None = None) -> List[
         return []
     threshold = np.percentile(heights, cfg.min_height_percentile)
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for i in range(n):
         text = data["text"][i].strip()
         if not text:
@@ -76,12 +78,14 @@ def detect(img: np.ndarray, page_num: int, cfg: ZonesCfg | None = None) -> List[
             continue
         conf = float(data["conf"][i]) if data["conf"][i] != "-1" else 0.0
         bbox = (data["left"][i], data["top"][i], data["width"][i], data["height"][i])
-        results.append({
-            "page": page_num,
-            "bbox": bbox,
-            "conf": conf,
-            "zone": text,
-        })
+        results.append(
+            {
+                "page": page_num,
+                "bbox": bbox,
+                "conf": conf,
+                "zone": text,
+            }
+        )
 
     logger.debug(f"Detected {len(results)} zones on page {page_num}")
-    return results 
+    return results

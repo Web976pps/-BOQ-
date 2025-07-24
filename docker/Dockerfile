@@ -15,4 +15,4 @@ COPY config ./config
 COPY pyproject.toml README.md Makefile ./.pre-commit-config.yaml ./
 
 ENV PYTHONPATH=/app
-ENTRYPOINT ["python", "-m", "src.extract_zones_codes"] 
+ENTRYPOINT ["python", "-m", "src.extract_zones_codes"]

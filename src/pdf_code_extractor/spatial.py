@@ -10,19 +10,18 @@ The output preserves the original `code` dict structure and enriches it with:
 
 It also returns a *SpatialReport* summarising assignment quality.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Tuple
-
 import math
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 from loguru import logger
-from sklearn.cluster import DBSCAN
 from scipy.spatial import Voronoi
-from shapely.geometry import Polygon, Point, box
-from shapely.ops import clip_by_rect
+from shapely.geometry import Point, Polygon, box
+from sklearn.cluster import DBSCAN
 
 __all__ = [
     "to_mm",
@@ -40,6 +39,7 @@ __all__ = [
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def to_mm(px: float, dpi: int) -> float:  # noqa: D401
     """Convert pixels to millimetres."""
     return px * 25.4 / dpi
@@ -55,12 +55,12 @@ def to_px(mm: float, dpi: int) -> float:  # noqa: D401
 # ---------------------------------------------------------------------------
 
 
-def _centroid(bbox: Tuple[int, int, int, int]) -> Tuple[float, float]:
+def _centroid(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
     x, y, w, h = bbox
     return (x + w / 2.0, y + h / 2.0)
 
 
-def _area(bbox: Tuple[int, int, int, int]) -> int:
+def _area(bbox: tuple[int, int, int, int]) -> int:
     _, _, w, h = bbox
     return w * h
 
@@ -68,11 +68,11 @@ def _area(bbox: Tuple[int, int, int, int]) -> int:
 @dataclass(slots=True)
 class ZoneToken:
     page: int
-    bbox: Tuple[int, int, int, int]
+    bbox: tuple[int, int, int, int]
     conf: float
     zone: str
 
-    centroid: Tuple[float, float] = field(init=False)
+    centroid: tuple[float, float] = field(init=False)
     area: int = field(init=False)
 
     def __post_init__(self) -> None:
@@ -83,12 +83,12 @@ class ZoneToken:
 @dataclass(slots=True)
 class CodeToken:
     page: int
-    bbox: Tuple[int, int, int, int]
+    bbox: tuple[int, int, int, int]
     conf: float
     code: str
     prefix: str
 
-    centroid: Tuple[float, float] = field(init=False)
+    centroid: tuple[float, float] = field(init=False)
 
     # Enriched later
     zone: str | None = None
@@ -104,6 +104,7 @@ class CodeToken:
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class DBSCANCfg:
     eps_mm: float = 2.0
@@ -114,7 +115,7 @@ class DBSCANCfg:
 class SpatialCfg:
     dpi: int = 300
     strategy: str = "dbscan"  # dbscan | voronoi
-    dbscan: DBSCANCfg = DBSCANCfg()
+    dbscan: DBSCANCfg = field(default_factory=DBSCANCfg)
 
     max_assign_dist_mm: float = 20.0  # fallback for voronoi
     zone_buffer_mm: float = 0.0  # expand zone polygons
@@ -131,7 +132,7 @@ class SpatialReport:
     mean_distance_px: float | None
     median_distance_px: float | None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
 
 
@@ -139,7 +140,8 @@ class SpatialReport:
 # Tie-breaker util
 # ---------------------------------------------------------------------------
 
-def _select_zone(candidates: List[ZoneToken], distance_fn) -> ZoneToken:
+
+def _select_zone(candidates: list[ZoneToken], distance_fn) -> ZoneToken:
     """Apply deterministic tie-breakers to choose one zone among *candidates*.
 
     *distance_fn* returns the distance from zone centroid to the code (or cluster cent.)
@@ -174,11 +176,12 @@ def _select_zone(candidates: List[ZoneToken], distance_fn) -> ZoneToken:
 # Core assignment
 # ---------------------------------------------------------------------------
 
+
 def assign(
-    zones: List[Dict[str, Any]],
-    codes: List[Dict[str, Any]],
-    cfg: SpatialCfg | Dict[str, Any] | None = None,
-) -> Tuple[List[CodeToken], SpatialReport]:  # noqa: D401
+    zones: list[dict[str, Any]],
+    codes: list[dict[str, Any]],
+    cfg: SpatialCfg | dict[str, Any] | None = None,
+) -> tuple[list[CodeToken], SpatialReport]:  # noqa: D401
     """Assign *codes* to *zones* following *cfg* strategy.
 
     Returns (*enriched_codes*, *report*)
@@ -232,7 +235,11 @@ def assign(
     median_dist = float(np.median(distances)) if distances else None
 
     # clusters count only for dbscan else len(zones)
-    clusters = len(set(c.cluster_id for c in code_tokens if c.cluster_id is not None)) if cfg.strategy == "dbscan" else len(zone_tokens)
+    clusters = (
+        len(set(c.cluster_id for c in code_tokens if c.cluster_id is not None))
+        if cfg.strategy == "dbscan"
+        else len(zone_tokens)
+    )
 
     report = SpatialReport(
         strategy=cfg.strategy,
@@ -255,41 +262,47 @@ def assign(
 # Strategy implementations
 # ---------------------------------------------------------------------------
 
-def _assign_dbscan(page_zones: List[ZoneToken], page_codes: List[CodeToken], cfg: SpatialCfg) -> None:
+
+def _assign_dbscan(
+    page_zones: list[ZoneToken], page_codes: list[CodeToken], cfg: SpatialCfg
+) -> None:
     eps_px = to_px(cfg.dbscan.eps_mm, cfg.dpi)
 
     coords = np.array([c.centroid for c in page_codes])
     clustering = DBSCAN(eps=eps_px, min_samples=cfg.dbscan.min_samples).fit(coords)
     labels = clustering.labels_
 
-    for lbl in set(labels):
-        cluster_codes = [c for c, l in zip(page_codes, labels) if l == lbl]
-        cluster_center = tuple(np.mean([c.centroid for c in cluster_codes], axis=0))
+    # Assign cluster_id for all codes first
+    for c, lbl in zip(page_codes, labels, strict=False):
+        c.cluster_id = int(lbl)
 
-        # find nearest zone centroid
-        dists = [math.dist(cluster_center, z.centroid) for z in page_zones]
+    # Assign zones per-code based on individual distance to nearest zone.
+    for c in page_codes:
+        c.strategy_used = "dbscan"
+
+        # Compute nearest zone(s) for this code
+        dists = [math.dist(c.centroid, z.centroid) for z in page_zones]
         min_dist = min(dists)
-        nearest_zones = [z for z, d in zip(page_zones, dists) if abs(d - min_dist) < 1e-6]
+        nearest_zones = [
+            z for z, d in zip(page_zones, dists, strict=False) if abs(d - min_dist) < 1e-6
+        ]
 
         if min_dist > eps_px:
-            assigned_zone = None  # outside eps
+            # Too far from any zone → unassigned
+            c.zone = "__UNASSIGNED__"
+            c.distance_px = None
         else:
-            assigned_zone = _select_zone(nearest_zones, lambda z: math.dist(cluster_center, z.centroid))
-
-        for c in cluster_codes:
-            c.cluster_id = int(lbl)
-            c.strategy_used = "dbscan"
-            if assigned_zone is None:
-                c.zone = "__UNASSIGNED__"
-                c.distance_px = None
-            else:
-                c.zone = assigned_zone.zone
-                c.distance_px = math.dist(c.centroid, assigned_zone.centroid)
+            chosen_zone = _select_zone(nearest_zones, lambda z: math.dist(c.centroid, z.centroid))
+            c.zone = chosen_zone.zone
+            c.distance_px = min_dist
 
 
 # ---------------------------------------------------------------------------
 
-def _assign_voronoi(page_zones: List[ZoneToken], page_codes: List[CodeToken], cfg: SpatialCfg) -> None:
+
+def _assign_voronoi(
+    page_zones: list[ZoneToken], page_codes: list[CodeToken], cfg: SpatialCfg
+) -> None:
     """Assign via Voronoi cells; fallback to nearest zone within `max_assign_dist_mm`."""
 
     # Construct Voronoi diagram from zone centroids
@@ -309,7 +322,7 @@ def _assign_voronoi(page_zones: List[ZoneToken], page_codes: List[CodeToken], cf
     bounds = box(min_x, min_y, max_x, max_y)
 
     # Map region index to polygon
-    region_polys: Dict[int, Polygon] = {}
+    region_polys: dict[int, Polygon] = {}
     for point_idx, region_idx in enumerate(vor.point_region):
         verts_idx = vor.regions[region_idx]
         if -1 in verts_idx or len(verts_idx) == 0:
@@ -342,8 +355,12 @@ def _assign_voronoi(page_zones: List[ZoneToken], page_codes: List[CodeToken], cf
             dists = [math.dist(c.centroid, z.centroid) for z in page_zones]
             min_dist = min(dists)
             if min_dist <= max_assign_dist_px:
-                nearest_zones = [z for z, d in zip(page_zones, dists) if abs(d - min_dist) < 1e-6]
-                assigned_zone = _select_zone(nearest_zones, lambda z: math.dist(c.centroid, z.centroid))
+                nearest_zones = [
+                    z for z, d in zip(page_zones, dists, strict=False) if abs(d - min_dist) < 1e-6
+                ]
+                assigned_zone = _select_zone(
+                    nearest_zones, lambda z: math.dist(c.centroid, z.centroid)
+                )
                 assigned_dist = min_dist
 
         c.strategy_used = "voronoi"
@@ -359,7 +376,10 @@ def _assign_voronoi(page_zones: List[ZoneToken], page_codes: List[CodeToken], cf
 # Nearest fallback
 # ---------------------------------------------------------------------------
 
-def _assign_nearest(page_zones: List[ZoneToken], page_codes: List[CodeToken], cfg: SpatialCfg) -> None:
+
+def _assign_nearest(
+    page_zones: list[ZoneToken], page_codes: list[CodeToken], cfg: SpatialCfg
+) -> None:
     """Simple nearest-zone assignment used when Voronoi cannot be constructed."""
     max_assign_px = to_px(cfg.max_assign_dist_mm, cfg.dpi)
     for c in page_codes:
@@ -369,8 +389,10 @@ def _assign_nearest(page_zones: List[ZoneToken], page_codes: List[CodeToken], cf
             c.zone = "__UNASSIGNED__"
             c.distance_px = None
         else:
-            nearest_zones = [z for z, d in zip(page_zones, dists) if abs(d - min_dist) < 1e-6]
+            nearest_zones = [
+                z for z, d in zip(page_zones, dists, strict=False) if abs(d - min_dist) < 1e-6
+            ]
             z = _select_zone(nearest_zones, lambda z: math.dist(c.centroid, z.centroid))
             c.zone = z.zone
             c.distance_px = min_dist
-        c.strategy_used = "nearest" 
+        c.strategy_used = "nearest"
