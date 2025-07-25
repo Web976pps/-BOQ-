@@ -459,6 +459,20 @@ class ZoneMemoryManager:
             self.zone_registry[zone_id]["furniture_codes"].append(
                 {"code": furniture_code, "confidence": confidence, "timestamp": datetime.now()}
             )
+            
+            # Agent 2 Fix: Dedup furniture codes using set
+            unique_codes = []
+            seen_codes = set()
+            for code_data in self.zone_registry[zone_id]["furniture_codes"]:
+                code_text = code_data["code"]
+                if code_text not in seen_codes:
+                    seen_codes.add(code_text)
+                    unique_codes.append(code_data)
+                else:
+                    logger.debug(f"Agent 2: Removed duplicate code '{code_text}' from zone '{zone_name}'")
+            
+            self.zone_registry[zone_id]["furniture_codes"] = unique_codes
+            logger.debug(f"Agent 2: Zone '{zone_name}' now has {len(unique_codes)} unique codes")
 
         self.processing_log.append(
             {
@@ -525,9 +539,11 @@ class ZoneMemoryManager:
     def get_zone_associations(self):
         """Get zone associations for CSV generation"""
         associations = {}
+        logger.debug(f"Pre-CSV: {len(self.zone_registry)} zones in registry")  # Agent 1 Fix
 
         for zone_id, zone_data in self.zone_registry.items():
             zone_name = zone_data["name"]
+            logger.debug(f"Agent 1: Processing zone '{zone_name}' with {len(zone_data['furniture_codes'])} furniture codes")
 
             # Convert furniture codes to the format expected by CSV generator
             codes = []
@@ -545,6 +561,8 @@ class ZoneMemoryManager:
                 "page": zone_data["page"],
                 "confidence": zone_data["confidence"],
             }
+
+        logger.debug(f"Agent 1: Final associations count: {len(associations)} zones with {sum(len(assoc['codes']) for assoc in associations.values())} total codes")
 
         return associations
 
@@ -566,10 +584,15 @@ class EnhancedZoneExtractor:
 
     def detect_all_caps_zones(self, text, confidence_threshold=0.6):
         """Enhanced zone detection with confidence scoring for architectural areas"""
+        # Agent 2 Fix: Add multiline merging logic
+        lines = text.split('\n')
+        merged_text = ' '.join([line.strip() for line in lines if line.strip()])
+        logger.debug(f"Agent 2: Original text lines: {len(lines)}, merged to: {len(merged_text.split())} words")
+        
         # Enhanced pattern for ALL CAPS zone names like "INNOVATION HUB", "EAT", "LOUNGE"
         # Handles single words and multi-word zones
         all_caps_pattern = r"\b[A-Z]{2,}(?:\s+[A-Z]{2,})*\b"
-        matches = re.findall(all_caps_pattern, text)
+        matches = re.findall(all_caps_pattern, merged_text)  # Use merged_text instead of text
 
         # Filter out common non-zone words (reduced list, more focused)
         excluded_words = {
@@ -972,12 +995,21 @@ class EnhancedZoneExtractor:
                     min_distance = distance
                     closest_zone = zone_text
             
+            # Agent 2 Fix: Dynamic threshold (15% of page width)
+            dynamic_threshold = 1500  # Default fallback
+            if ocr_data:
+                # Estimate image width from OCR data
+                max_x = max(word.get("x", 0) + word.get("w", 0) for word in ocr_data)
+                dynamic_threshold = max(200, min(2000, max_x * 0.15))  # 15% of page width
+                logger.debug(f"Agent 2: Smart matching dynamic threshold: {dynamic_threshold:.1f}px (15% of {max_x}px width)")
+            
             # Associate if reasonable distance
-            if closest_zone and min_distance < 1500:  # More lenient for fuzzy matching
+            if closest_zone and min_distance < dynamic_threshold:
                 confidence = code.get("confidence", 0.8) * 0.9  # Slightly reduce confidence for fuzzy
                 page_num = code.get("page", 1)
                 self.memory_manager.associate_furniture_code(closest_zone, page_num, code_text, confidence)
                 associations_made += 1
+                logger.debug(f"Agent 2: Smart association '{code_text}' → '{closest_zone}' (distance: {min_distance:.1f}px, threshold: {dynamic_threshold:.1f}px)")
                 st.success(f"✅ SMART: '{original_text}' → '{closest_zone}' (distance: {min_distance:.1f}px)")
             else:
                 st.warning(f"⚠️ No suitable zone found for '{original_text}' (min distance: {min_distance:.1f}px)")
