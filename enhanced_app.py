@@ -400,99 +400,128 @@ class EnhancedZoneExtractor:
         self.geometric_analyzer = GeometricAnalyzer()
         self.memory_manager = ZoneMemoryManager()
 
-    def detect_all_caps_zones(self, text, confidence_threshold=0.8):
-        """Enhanced zone detection with confidence scoring"""
-        # Pattern for ALL CAPS words (2+ chars) that could be zone names
+    def detect_all_caps_zones(self, text, confidence_threshold=0.6):
+        """Enhanced zone detection with confidence scoring for architectural areas"""
+        # Enhanced pattern for ALL CAPS zone names like "INNOVATION HUB", "EAT", "LOUNGE"
+        # Handles single words and multi-word zones
         all_caps_pattern = r"\b[A-Z]{2,}(?:\s+[A-Z]{2,})*\b"
         matches = re.findall(all_caps_pattern, text)
 
-        # Filter out common non-zone words
+        # Filter out common non-zone words (reduced list, more focused)
         excluded_words = {
-            "THE",
-            "AND",
-            "OR",
-            "IN",
-            "ON",
-            "AT",
-            "TO",
-            "FOR",
-            "OF",
-            "WITH",
-            "BY",
-            "PLAN",
-            "FLOOR",
-            "LEVEL",
-            "SCALE",
-            "DRAWING",
-            "PROJECT",
-            "LEGEND",
+            "THE", "AND", "OR", "IN", "ON", "AT", "TO", "FOR", "OF", "WITH", "BY",
+            "PLAN", "FLOOR", "LEVEL", "SCALE", "DRAWING", "PROJECT", "LEGEND",
+            "PDF", "DPI", "PAGE", "IMAGE", "TEXT", "TITLE", "LABEL", "HEADER", "FOOTER",
+            "NORTH", "SOUTH", "EAST", "WEST", "LEFT", "RIGHT", "TOP", "BOTTOM", "CENTER"
         }
+        
         zone_candidates = []
 
         for match in matches:
-            words = match.split()
-            # Keep if it's not just excluded words and has meaningful length
-            if len(match) >= 3 and not all(word in excluded_words for word in words):
-                # Calculate confidence based on length and architectural terms
-                confidence = self._calculate_zone_confidence(match)
-                if confidence >= confidence_threshold:
-                    zone_candidates.append({"name": match, "confidence": confidence})
+            # Clean the match
+            clean_match = match.strip()
+            words = clean_match.split()
+            
+            # Skip if too short
+            if len(clean_match) < 3:
+                continue
+                
+            # Skip if all words are excluded
+            if all(word in excluded_words for word in words):
+                continue
+            
+            # Skip obvious furniture codes (they have our prefixes)
+            is_furniture_code = any(clean_match.startswith(prefix) for prefix in ["CH", "TB", "C", "SU", "KT"])
+            if is_furniture_code:
+                continue
+                
+            # Calculate confidence based on architectural relevance
+            confidence = self._calculate_zone_confidence(clean_match)
+            
+            # Lower threshold for better zone detection
+            if confidence >= confidence_threshold:
+                zone_candidates.append({"name": clean_match, "confidence": confidence})
 
         return zone_candidates
 
     def _calculate_zone_confidence(self, zone_name):
         """Calculate confidence score for zone detection"""
-        confidence = 0.5  # Base confidence
+        confidence = 0.4  # Base confidence (lowered for better detection)
 
-        # Boost confidence for architectural terms
+        # Enhanced architectural terms based on user examples
         architectural_terms = [
-            "HUB",
-            "SPACE",
-            "ROOM",
-            "AREA",
-            "ZONE",
-            "KITCHEN",
-            "OFFICE",
-            "MEETING",
-            "CONFERENCE",
-            "LOBBY",
-            "RECEPTION",
-            "STORAGE",
+            # Core architectural spaces
+            "HUB", "INNOVATION", "EAT", "LOUNGE", "KITCHEN", "DINING",
+            "OFFICE", "WORKSPACE", "STUDIO", "MEETING", "CONFERENCE", 
+            "LOBBY", "RECEPTION", "ENTRANCE", "EXIT",
+            # Common spaces
+            "ROOM", "SPACE", "AREA", "ZONE", "HALL", "CORRIDOR",
+            "BATHROOM", "TOILET", "STORAGE", "CLOSET", "PANTRY",
+            # Activity spaces  
+            "PRACTICE", "STUDY", "LIBRARY", "LAB", "CLINIC", "GYM",
+            "THEATER", "GALLERY", "EXHIBITION", "RETAIL", "SHOP",
+            # Outdoor/special
+            "GARDEN", "TERRACE", "BALCONY", "COURTYARD", "PATIO",
+            "CAFE", "BAR", "RESTAURANT", "CAFETERIA"
         ]
-        for term in architectural_terms:
-            if term in zone_name:
-                confidence += 0.2
-                break
+        
+        # Check for architectural terms (multiple matches possible)
+        term_matches = sum(1 for term in architectural_terms if term in zone_name)
+        if term_matches > 0:
+            confidence += 0.3 * min(term_matches, 2)  # Cap at 0.6 boost
 
-        # Boost for reasonable length
-        if 3 <= len(zone_name) <= 20:
+        # Boost for reasonable length (zones are usually descriptive)
+        if 3 <= len(zone_name) <= 25:
             confidence += 0.2
 
-        # Boost for multiple words (likely to be zone names)
-        if len(zone_name.split()) > 1:
+        # Boost for multiple words (architectural zones often are multi-word)
+        word_count = len(zone_name.split())
+        if word_count > 1:
+            confidence += 0.15
+            
+        # Additional boost for very descriptive zones (like "INNOVATION HUB")
+        if word_count >= 2 and any(term in zone_name for term in architectural_terms):
             confidence += 0.1
+
+        # Penalize very long strings (likely not zone names)
+        if len(zone_name) > 25:
+            confidence -= 0.2
 
         return min(confidence, 1.0)
 
     def detect_furniture_codes(self, text, confidence_threshold=0.8):
-        """Enhanced furniture code detection with confidence"""
+        """Enhanced furniture code detection with confidence - handles all variations"""
         furniture_codes = []
 
         for prefix in self.furniture_prefixes:
-            # Pattern: PREFIX followed by numbers, optional letter/space variations
-            pattern = rf"\b{prefix}\d+(?:[A-Za-z]|\s+[A-Za-z])?\b"
+            # Enhanced pattern to handle all variations: CH15, CH15A, CH15 a, CH15b, CH21 b
+            # Pattern explanation:
+            # \b{prefix} - word boundary + prefix (CH, TB, C, SU, KT)
+            # \d+ - one or more digits (15, 21, 03, etc.)
+            # (?:\s*[A-Za-z])? - optional space + letter (for "CH15 a", "CH21 b")
+            pattern = rf"\b{prefix}\s*\d+(?:\s*[A-Za-z])?\b"
             matches = re.findall(pattern, text, re.IGNORECASE)
 
             for match in matches:
-                # Clean and normalize
-                clean_code = re.sub(r"\s+", "", match.upper())
+                # Normalize the code while preserving the format
+                # Remove extra spaces but keep intentional ones
+                normalized_code = re.sub(r'\s+', ' ', match.strip()).upper()
+                
+                # Further clean for storage (remove spaces)
+                clean_code = re.sub(r'\s+', '', normalized_code)
 
                 # Calculate confidence
                 confidence = self._calculate_code_confidence(clean_code, prefix)
 
                 if confidence >= confidence_threshold:
                     furniture_codes.append(
-                        {"code": clean_code, "prefix": prefix, "confidence": confidence}
+                        {
+                            "code": clean_code,  # Clean version for processing
+                            "original": match,   # Original detected text
+                            "normalized": normalized_code,  # Normalized display version
+                            "prefix": prefix, 
+                            "confidence": confidence
+                        }
                     )
 
         return furniture_codes
@@ -521,7 +550,9 @@ class EnhancedZoneExtractor:
         associations_made = 0
         
         for code in codes:
-            code_text = code.get("text", "")
+            # Handle both old and new code structure
+            code_text = code.get("code", code.get("text", ""))
+            original_text = code.get("original", code_text)
             code_bbox = code.get("bbox", {})
             code_x = code_bbox.get("x1", 0) + (code_bbox.get("w", 0) / 2)
             code_y = code_bbox.get("y1", 0) + (code_bbox.get("h", 0) / 2)
@@ -550,9 +581,9 @@ class EnhancedZoneExtractor:
                     closest_zone, 1, code_text, confidence
                 )
                 associations_made += 1
-                st.success(f"✅ Associated '{code_text}' with zone '{closest_zone}' (distance: {min_distance:.1f}px)")
+                st.success(f"✅ Associated '{original_text}' → '{code_text}' with zone '{closest_zone}' (distance: {min_distance:.1f}px)")
             else:
-                st.warning(f"⚠️ Code '{code_text}' too far from any zone (min distance: {min_distance:.1f}px)")
+                st.warning(f"⚠️ Code '{original_text}' too far from any zone (min distance: {min_distance:.1f}px)")
         
         st.info(f"🔗 Association complete: {associations_made} codes associated to zones")
 
