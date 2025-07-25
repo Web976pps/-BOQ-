@@ -30,9 +30,9 @@ run-enhanced:
 run-streamlit:
 	. .venv/bin/activate && streamlit run app.py
 
-# Original UI
+# Enhanced UI (FIXED: Now uses enhanced_app.py)
 ui:
-	. .venv/bin/activate && streamlit run src/ui/streamlit_app.py
+	. .venv/bin/activate && streamlit run enhanced_app.py --server.port=8501 --server.address=0.0.0.0
 
 # Comprehensive testing
 test:
