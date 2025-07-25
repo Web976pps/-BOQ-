@@ -884,6 +884,101 @@ class EnhancedZoneExtractor:
 
         return min(confidence, 1.0)
 
+    def _find_text_position_fuzzy(self, target_text, ocr_data, threshold=0.6):
+        """Find position of text using fuzzy matching"""
+        import difflib
+        
+        target_clean = target_text.upper().strip()
+        best_match = None
+        best_score = 0
+        
+        for word_data in ocr_data:
+            word_text = word_data.get('text', '').strip().upper()
+            if not word_text:
+                continue
+                
+            # Direct match
+            if target_clean in word_text or word_text in target_clean:
+                return word_data
+            
+            # Fuzzy matching
+            similarity = difflib.SequenceMatcher(None, target_clean, word_text).ratio()
+            if similarity > best_score and similarity >= threshold:
+                best_score = similarity
+                best_match = word_data
+        
+        return best_match
+
+    def _associate_with_smart_matching(self, results):
+        """Enhanced association using smart text matching"""
+        zones = results.get("zones", [])
+        codes = results.get("codes", [])
+        ocr_data = results.get("ocr_data", [])
+        
+        if not zones or not codes or not ocr_data:
+            st.warning("⚠️ Insufficient data for smart association")
+            return 0
+        
+        associations_made = 0
+        st.info("🧠 Using smart text matching for association...")
+        
+        for code in codes:
+            code_text = code.get("code", code.get("text", ""))
+            original_text = code.get("original", code_text)
+            
+            # Find code position using fuzzy matching
+            code_pos = self._find_text_position_fuzzy(code_text, ocr_data)
+            if not code_pos:
+                # Try with original text
+                code_pos = self._find_text_position_fuzzy(original_text, ocr_data)
+            
+            if not code_pos:
+                st.warning(f"⚠️ No position found for code '{original_text}' even with fuzzy matching")
+                continue
+                
+            code_x = code_pos["x"] + code_pos.get("w", 0) // 2
+            code_y = code_pos["y"] + code_pos.get("h", 0) // 2
+            
+            st.info(f"📍 Code '{code_text}' found at ({code_x}, {code_y}) via fuzzy match")
+            
+            # Find closest zone
+            closest_zone = None
+            min_distance = float("inf")
+            
+            for zone in zones:
+                zone_text = zone.get("zone_area", zone.get("text", ""))
+                
+                # Try each word in zone name
+                zone_pos = None
+                for zone_word in zone_text.split():
+                    if len(zone_word) > 2:  # Skip very short words
+                        zone_pos = self._find_text_position_fuzzy(zone_word, ocr_data)
+                        if zone_pos:
+                            break
+                
+                if not zone_pos:
+                    continue
+                    
+                zone_x = zone_pos["x"] + zone_pos.get("w", 0) // 2
+                zone_y = zone_pos["y"] + zone_pos.get("h", 0) // 2
+                
+                distance = ((code_x - zone_x) ** 2 + (code_y - zone_y) ** 2) ** 0.5
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_zone = zone_text
+            
+            # Associate if reasonable distance
+            if closest_zone and min_distance < 1500:  # More lenient for fuzzy matching
+                confidence = code.get("confidence", 0.8) * 0.9  # Slightly reduce confidence for fuzzy
+                page_num = code.get("page", 1)
+                self.memory_manager.associate_furniture_code(closest_zone, page_num, code_text, confidence)
+                associations_made += 1
+                st.success(f"✅ SMART: '{original_text}' → '{closest_zone}' (distance: {min_distance:.1f}px)")
+            else:
+                st.warning(f"⚠️ No suitable zone found for '{original_text}' (min distance: {min_distance:.1f}px)")
+        
+        return associations_made
+
     def associate_detected_codes_to_zones(self, results):
         """Associate detected furniture codes with their corresponding zones using OCR positions"""
         st.info("🔗 Associating furniture codes to zones...")
@@ -1038,6 +1133,12 @@ class EnhancedZoneExtractor:
                     f"⚠️ Code '{original_text}' could not be associated (min distance: {min_distance:.1f}px)"
                 )
 
+        # If no associations made, try smart matching as fallback
+        if associations_made == 0:
+            st.warning("⚠️ Standard association failed - trying smart matching...")
+            smart_associations = self._associate_with_smart_matching(results)
+            associations_made += smart_associations
+        
         st.info(f"🔗 Association complete: {associations_made} codes associated to zones")
 
     def generate_structured_csv(self, results):
