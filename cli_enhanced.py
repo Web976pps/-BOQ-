@@ -174,20 +174,20 @@ def process_pdf_cli(pdf_path, output_dir, dpi=600, verbose=False, confidence_thr
         for zone in results.get('zones', []):
             csv_data.append({
                 'Type': 'Zone',
-                'Text': zone.get('text', ''),
+                'Text': zone.get('zone_area', ''),  # Fixed: use 'zone_area' instead of 'text'
                 'Category': 'Zone/Area',
                 'Confidence': zone.get('confidence', 0),
-                'Coordinates': f"({zone.get('bbox', {}).get('x1', 0)}, {zone.get('bbox', {}).get('y1', 0)})"
+                'Coordinates': f"({zone.get('x', 0)}, {zone.get('y', 0)})"  # Fixed: use actual coordinate fields
             })
         
         # Add codes
         for code in results.get('codes', []):
             csv_data.append({
                 'Type': 'Code',
-                'Text': code.get('text', ''),
-                'Category': code.get('type', ''),
+                'Text': code.get('code', ''),  # Fixed: use 'code' instead of 'text'
+                'Category': code.get('code_type', ''),  # Fixed: use 'code_type' instead of 'type'
                 'Confidence': code.get('confidence', 0),
-                'Coordinates': f"({code.get('bbox', {}).get('x1', 0)}, {code.get('bbox', {}).get('y1', 0)})"
+                'Coordinates': f"({code.get('x', 0)}, {code.get('y', 0)})"  # Fixed: use actual coordinate fields
             })
         
         # Save CSV
