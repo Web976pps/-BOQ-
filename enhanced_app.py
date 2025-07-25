@@ -13,11 +13,39 @@ import pytesseract
 import streamlit as st
 from pdf2image import convert_from_path
 from PIL import Image, ImageFile
+from shapely.geometry import Point, box
+from shapely.ops import unary_union
 from sklearn.cluster import DBSCAN
 
 # Increase PIL image size limit to handle large architectural PDFs
 Image.MAX_IMAGE_PIXELS = None  # Remove limit entirely (with caution)
 ImageFile.LOAD_TRUNCATED_IMAGES = True  # Handle truncated images gracefully
+
+
+# Enhanced spatial analysis utilities
+def to_mm(px: float, dpi: int) -> float:
+    """Convert pixels to millimetres for precise measurements"""
+    return px * 25.4 / dpi
+
+
+def to_px(mm: float, dpi: int) -> float:
+    """Convert millimetres to pixels for DPI scaling"""
+    return mm * dpi / 25.4
+
+
+def calculate_polygon_overlap(poly1, poly2):
+    """Calculate overlap percentage between two Shapely polygons"""
+    try:
+        if not poly1.intersects(poly2):
+            return 0.0
+        intersection = poly1.intersection(poly2)
+        smaller_area = min(poly1.area, poly2.area)
+        if smaller_area == 0:
+            return 0.0
+        return (intersection.area / smaller_area) * 100
+    except Exception:
+        return 0.0
+
 
 st.set_page_config(page_title="A1 PDF Zones/Codes Extractor - Enhanced", layout="wide")
 
@@ -32,6 +60,11 @@ class A1PDFProcessor:
         self.a1_dimensions_mm = (594, 841)  # A1 size in mm
         self.a1_dimensions_px = None  # Will be calculated based on DPI
         self.max_pixels = 50_000_000  # 50 megapixels safety limit
+
+        # Enhanced performance optimization
+        self.optimization_enabled = True
+        self.shapely_acceleration = True
+        self.memory_efficient_processing = True
 
     def detect_a1_format(self, pdf_path):
         """Detect if PDF is A1 format and get orientation"""
@@ -146,7 +179,7 @@ class A1PDFProcessor:
                             img_array = cv2.rotate(img_array, cv2.ROTATE_90_CLOCKWISE)
 
                         return Image.fromarray(img_array)
-            except:
+            except Exception:
                 pass  # OSD might fail, continue with original
 
             return image
@@ -233,7 +266,7 @@ class GeometricAnalyzer:
             return []
 
     def create_zone_polygons(self, clusters, image_dimensions):
-        """Create polygonal zone boundaries from clusters"""
+        """Create enhanced polygonal zone boundaries using Shapely geometry"""
         try:
             zone_polygons = []
 
@@ -241,36 +274,85 @@ class GeometricAnalyzer:
                 if len(cluster) < 2:
                     continue
 
-                # Get bounding box of cluster
-                x_coords = [pos["x"] for pos in cluster]
-                y_coords = [pos["y"] for pos in cluster]
-                w_coords = [pos["w"] for pos in cluster]
-                h_coords = [pos["h"] for pos in cluster]
+                try:
+                    # Enhanced Shapely-based polygon creation
+                    boxes = []
+                    for pos in cluster:
+                        x, y, w, h = pos["x"], pos["y"], pos["w"], pos["h"]
+                        boxes.append(box(x, y, x + w, y + h))
 
-                min_x = min(x_coords)
-                max_x = max([x + w for x, w in zip(x_coords, w_coords, strict=False)])
-                min_y = min(y_coords)
-                max_y = max([y + h for y, h in zip(y_coords, h_coords, strict=False)])
+                    # Merge overlapping boxes using Shapely union for more accurate zones
+                    merged_geometry = unary_union(boxes)
 
-                # Create polygon with some padding
-                padding = 20
-                polygon = [
-                    (max(0, min_x - padding), max(0, min_y - padding)),
-                    (min(image_dimensions[0], max_x + padding), max(0, min_y - padding)),
-                    (
-                        min(image_dimensions[0], max_x + padding),
-                        min(image_dimensions[1], max_y + padding),
-                    ),
-                    (max(0, min_x - padding), min(image_dimensions[1], max_y + padding)),
-                ]
+                    # Handle both single and multi-polygon results
+                    if hasattr(merged_geometry, "geoms"):
+                        # MultiPolygon - take the largest for main zone
+                        largest_polygon = max(merged_geometry.geoms, key=lambda p: p.area)
+                    else:
+                        # Single Polygon
+                        largest_polygon = merged_geometry
 
-                zone_polygons.append(
-                    {
-                        "polygon": polygon,
-                        "cluster_data": cluster,
-                        "area": (max_x - min_x) * (max_y - min_y),
-                    }
-                )
+                    # Add padding for better zone coverage
+                    padding = 20
+                    buffered_polygon = largest_polygon.buffer(padding)
+
+                    # Clip to image dimensions
+                    image_bounds = box(0, 0, image_dimensions[0], image_dimensions[1])
+                    final_polygon = buffered_polygon.intersection(image_bounds)
+
+                    # Extract coordinates
+                    if final_polygon.is_empty:
+                        continue
+
+                    polygon_coords = list(final_polygon.exterior.coords)
+                    bounds = final_polygon.bounds
+
+                    zone_polygons.append(
+                        {
+                            "polygon": polygon_coords,
+                            "cluster_data": cluster,
+                            "area": final_polygon.area,
+                            "bounds": {
+                                "min_x": bounds[0],
+                                "max_x": bounds[2],
+                                "min_y": bounds[1],
+                                "max_y": bounds[3],
+                            },
+                            "shapely_polygon": final_polygon,  # Store for advanced operations
+                        }
+                    )
+
+                except Exception:
+                    # Fallback to original bounding box method
+                    x_coords = [pos["x"] for pos in cluster]
+                    y_coords = [pos["y"] for pos in cluster]
+                    w_coords = [pos["w"] for pos in cluster]
+                    h_coords = [pos["h"] for pos in cluster]
+
+                    min_x = min(x_coords)
+                    max_x = max([x + w for x, w in zip(x_coords, w_coords, strict=False)])
+                    min_y = min(y_coords)
+                    max_y = max([y + h for y, h in zip(y_coords, h_coords, strict=False)])
+
+                    # Create polygon with padding
+                    padding = 20
+                    polygon = [
+                        (max(0, min_x - padding), max(0, min_y - padding)),
+                        (min(image_dimensions[0], max_x + padding), max(0, min_y - padding)),
+                        (
+                            min(image_dimensions[0], max_x + padding),
+                            min(image_dimensions[1], max_y + padding),
+                        ),
+                        (max(0, min_x - padding), min(image_dimensions[1], max_y + padding)),
+                    ]
+
+                    zone_polygons.append(
+                        {
+                            "polygon": polygon,
+                            "cluster_data": cluster,
+                            "area": (max_x - min_x) * (max_y - min_y),
+                        }
+                    )
 
             return zone_polygons
 
@@ -389,29 +471,31 @@ class ZoneMemoryManager:
                 code_type = code_data["code"][:2]  # Get prefix
                 by_type[code_type] += 1
         return dict(by_type)
-    
+
     def get_zone_associations(self):
         """Get zone associations for CSV generation"""
         associations = {}
-        
+
         for zone_id, zone_data in self.zone_registry.items():
             zone_name = zone_data["name"]
-            
+
             # Convert furniture codes to the format expected by CSV generator
             codes = []
             for code_data in zone_data["furniture_codes"]:
-                codes.append({
-                    "code": code_data["code"],
-                    "prefix": code_data["code"][:2] if len(code_data["code"]) >= 2 else "",
-                    "confidence": code_data.get("confidence", 0.8)
-                })
-            
+                codes.append(
+                    {
+                        "code": code_data["code"],
+                        "prefix": code_data["code"][:2] if len(code_data["code"]) >= 2 else "",
+                        "confidence": code_data.get("confidence", 0.8),
+                    }
+                )
+
             associations[zone_name] = {
                 "codes": codes,
                 "page": zone_data["page"],
-                "confidence": zone_data["confidence"]
+                "confidence": zone_data["confidence"],
             }
-        
+
         return associations
 
 
@@ -423,6 +507,12 @@ class EnhancedZoneExtractor:
         self.pdf_processor = A1PDFProcessor()
         self.geometric_analyzer = GeometricAnalyzer()
         self.memory_manager = ZoneMemoryManager()
+
+        # Performance optimization settings
+        self.batch_processing = True
+        self.parallel_ocr = True
+        self.geometric_optimization = True
+        self.memory_conservation = True
 
     def detect_all_caps_zones(self, text, confidence_threshold=0.6):
         """Enhanced zone detection with confidence scoring for architectural areas"""
@@ -598,54 +688,52 @@ class EnhancedZoneExtractor:
             # Mixed: CH-15A, CH.15 b, CH_15-A, CH/15.2
             # OCR errors: CH1S (S instead of 5), CHI5 (I instead of 1)
             # Leading zeros: CH015, CH0015, CH005A
-            
+
             patterns = [
                 # Main pattern - very flexible with separators
                 rf"\b{prefix}[-.\s_/:]*\d+[-.\s_/:]*[A-Za-z]*\b",
-                
                 # Allow OCR character substitutions (1→I, 5→S, 0→O)
                 rf"\b{prefix}[-.\s_/:]*[0-9IlOS]+[-.\s_/:]*[A-Za-z]*\b",
-                
                 # Multiple letters and decimal numbers
                 rf"\b{prefix}[-.\s_/]*\d+\.?\d*[-.\s_/]*[A-Za-z]{{1,4}}\b",
-                
                 # Very permissive - any non-alphanumeric separators
                 rf"\b{prefix}[^\w]*[0-9IlOS]+[^\w]*[A-Za-z]*\b",
-                
                 # Handle spaces before prefix (OCR artifacts)
                 rf"\s+{prefix}[-.\s_]*\d+[-.\s_]*[A-Za-z]*\b",
             ]
-            
+
             all_matches = set()  # Use set to avoid duplicates
-            
+
             for pattern in patterns:
                 try:
                     matches = re.findall(pattern, text, re.IGNORECASE)
                     for match in matches:
                         # Only add if it looks like a real code (has digits or digit-like chars)
-                        if re.search(r'[\d0-9IlOS]', match) and len(match.strip()) >= 3:
+                        if re.search(r"[\d0-9IlOS]", match) and len(match.strip()) >= 3:
                             all_matches.add(match.strip())
-                except:
+                except Exception:
                     continue  # Skip if pattern fails
-            
+
             # Process all unique matches
             for match in all_matches:
                 # Flexible normalization - handle many formats
                 normalized_code = self._normalize_furniture_code_fuzzy(match, prefix)
-                
+
                 if normalized_code:  # Only if normalization succeeded
                     # Calculate confidence with fuzzy scoring
-                    confidence = self._calculate_fuzzy_code_confidence(normalized_code, match, prefix)
+                    confidence = self._calculate_fuzzy_code_confidence(
+                        normalized_code, match, prefix
+                    )
 
                     if confidence >= confidence_threshold:
                         furniture_codes.append(
                             {
                                 "code": normalized_code,  # Normalized version
-                                "original": match,        # Original detected text
+                                "original": match,  # Original detected text
                                 "display": self._format_code_for_display(normalized_code),
-                                "prefix": prefix, 
+                                "prefix": prefix,
                                 "confidence": confidence,
-                                "fuzzy_match": True
+                                "fuzzy_match": True,
                             }
                         )
 
@@ -656,74 +744,77 @@ class EnhancedZoneExtractor:
         try:
             # Clean the match
             clean_match = match.strip().upper()
-            
+
             # Handle OCR character substitutions
-            clean_match = clean_match.replace('I', '1').replace('l', '1').replace('O', '0').replace('S', '5')
-            
+            clean_match = (
+                clean_match.replace("I", "1").replace("l", "1").replace("O", "0").replace("S", "5")
+            )
+
             # Extract prefix and number part
             prefix_part = prefix
-            
+
             # Find the number part (may have separators)
             import re
-            number_match = re.search(r'[\d0-9]+', clean_match)
+
+            number_match = re.search(r"[\d0-9]+", clean_match)
             if not number_match:
                 return None
-                
+
             number_part = number_match.group()
-            
+
             # Find letter part (after the number)
-            letter_match = re.search(r'[A-Z]+$', clean_match)
+            letter_match = re.search(r"[A-Z]+$", clean_match)
             letter_part = letter_match.group() if letter_match else ""
-            
+
             # Combine into normalized format
             normalized = f"{prefix_part}{number_part}"
             if letter_part:
                 normalized += letter_part
-                
+
             return normalized
-            
-        except:
+
+        except Exception:
             return None
-    
+
     def _calculate_fuzzy_code_confidence(self, normalized_code, original_match, prefix):
         """Calculate confidence for fuzzy matched codes"""
         confidence = 0.5  # Base confidence for fuzzy match
-        
+
         # Boost for exact prefix match
         if normalized_code.startswith(prefix):
             confidence += 0.2
-            
+
         # Boost for proper format (prefix + numbers + optional letters)
         if re.match(rf"^{prefix}\d+[A-Z]*$", normalized_code):
             confidence += 0.2
-            
+
         # Boost for short, clean codes
         if len(normalized_code) <= 6:
             confidence += 0.1
-            
+
         # Penalize very long codes (likely false positives)
         if len(normalized_code) > 10:
             confidence -= 0.2
-            
+
         # Boost if original match is clean (no weird characters)
         if re.match(rf"^{prefix}[\s\d\w]+$", original_match):
             confidence += 0.1
-            
+
         return min(confidence, 1.0)
-    
+
     def _format_code_for_display(self, normalized_code):
         """Format code for display"""
         if len(normalized_code) <= 2:
             return normalized_code
-            
+
         # Split into prefix, number, letter
         prefix = normalized_code[:2]
         rest = normalized_code[2:]
-        
+
         # Find where letters start
         number_part = ""
         letter_part = ""
-        
+
         for i, char in enumerate(rest):
             if char.isalpha():
                 number_part = rest[:i]
@@ -731,7 +822,7 @@ class EnhancedZoneExtractor:
                 break
         else:
             number_part = rest
-            
+
         # Format nicely
         if letter_part:
             return f"{prefix}{number_part}{letter_part}"
@@ -786,17 +877,46 @@ class EnhancedZoneExtractor:
                     min_distance = distance
                     closest_zone = zone_text
 
-            # Associate if reasonable distance (within 500 pixels)
-            if closest_zone and min_distance < 500:
+            # Enhanced association using both distance and geometric containment
+            association_made = False
+            association_method = "distance"
+
+            # Try geometric containment first if Shapely polygons are available
+            try:
+                # Check if any zone polygons contain this code point
+                code_point = Point(code_x, code_y)
+                for zone in zones:
+                    zone_text = zone.get("text", "")
+                    zone_data = zone.get("shapely_polygon")
+
+                    if zone_data and zone_data.contains(code_point):
+                        confidence = code.get("confidence", 0.8)
+                        self.memory_manager.associate_furniture_code(
+                            zone_text, 1, code_text, confidence
+                        )
+                        associations_made += 1
+                        association_made = True
+                        association_method = "geometric_containment"
+                        st.success(
+                            f"✅ Associated '{original_text}' → '{code_text}' with zone '{zone_text}' (geometric containment)"
+                        )
+                        break
+            except Exception:
+                pass  # Fall back to distance method
+
+            # Fall back to distance-based association if geometric containment failed
+            if not association_made and closest_zone and min_distance < 500:
                 confidence = code.get("confidence", 0.8)
                 self.memory_manager.associate_furniture_code(closest_zone, 1, code_text, confidence)
                 associations_made += 1
+                association_made = True
                 st.success(
                     f"✅ Associated '{original_text}' → '{code_text}' with zone '{closest_zone}' (distance: {min_distance:.1f}px)"
                 )
-            else:
+
+            if not association_made:
                 st.warning(
-                    f"⚠️ Code '{original_text}' too far from any zone (min distance: {min_distance:.1f}px)"
+                    f"⚠️ Code '{original_text}' could not be associated (min distance: {min_distance:.1f}px)"
                 )
 
         st.info(f"🔗 Association complete: {associations_made} codes associated to zones")
@@ -811,122 +931,138 @@ class EnhancedZoneExtractor:
         try:
             # Get zones and codes from memory manager (where associations are stored)
             zone_data = self.memory_manager.get_zone_associations()
-            
+
             csv_rows = []
-            
+
             # Track grand totals for each code type
             grand_totals = {
                 "CH": 0,  # Chairs
-                "TB": 0,  # Tables  
-                "C": 0,   # General furniture
+                "TB": 0,  # Tables
+                "C": 0,  # General furniture
                 "SU": 0,  # Storage Units
-                "KT": 0   # Kitchen/joinery
+                "KT": 0,  # Kitchen/joinery
             }
-            
+
             st.info(f"📊 Processing {len(zone_data)} zones for CSV generation...")
-            
+
             # Process each zone
             for zone_name, zone_info in zone_data.items():
                 codes_in_zone = zone_info.get("codes", [])
-                
+
                 if not codes_in_zone:
                     # Zone with no codes - still include in CSV
-                    csv_rows.append({
-                        "Zone_Area": zone_name,
-                        "Furniture_Code": "",
-                        "Code_Type": "",
-                        "Subtotal_Count": 0,
-                        "Notes": "No furniture codes detected in this zone"
-                    })
+                    csv_rows.append(
+                        {
+                            "Zone_Area": zone_name,
+                            "Furniture_Code": "",
+                            "Code_Type": "",
+                            "Subtotal_Count": 0,
+                            "Notes": "No furniture codes detected in this zone",
+                        }
+                    )
                     continue
-                
+
                 # Count codes by type in this zone
                 zone_totals = {"CH": 0, "TB": 0, "C": 0, "SU": 0, "KT": 0}
-                
+
                 # First pass: count codes by type
                 for code_info in codes_in_zone:
                     code = code_info.get("code", "")
                     prefix = code_info.get("prefix", "")
-                    
+
                     # Filter by allowed prefixes only
                     if prefix in ["CH", "TB", "C", "SU", "KT"]:
                         zone_totals[prefix] += 1
                         grand_totals[prefix] += 1
-                
+
                 # Second pass: generate rows for each code type found in this zone
                 zone_has_codes = False
                 for code_type in ["CH", "TB", "C", "SU", "KT"]:
                     if zone_totals[code_type] > 0:
                         zone_has_codes = True
-                        
+
                         # Get example codes of this type
                         example_codes = [
-                            code_info.get("code", "") 
-                            for code_info in codes_in_zone 
+                            code_info.get("code", "")
+                            for code_info in codes_in_zone
                             if code_info.get("prefix", "") == code_type
                         ]
-                        
-                        csv_rows.append({
-                            "Zone_Area": zone_name,
-                            "Furniture_Code": ", ".join(example_codes[:5]),  # Show up to 5 examples
-                            "Code_Type": code_type,
-                            "Subtotal_Count": zone_totals[code_type],
-                            "Notes": f"{zone_totals[code_type]} {code_type} codes detected"
-                        })
-                
+
+                        csv_rows.append(
+                            {
+                                "Zone_Area": zone_name,
+                                "Furniture_Code": ", ".join(
+                                    example_codes[:5]
+                                ),  # Show up to 5 examples
+                                "Code_Type": code_type,
+                                "Subtotal_Count": zone_totals[code_type],
+                                "Notes": f"{zone_totals[code_type]} {code_type} codes detected",
+                            }
+                        )
+
                 if not zone_has_codes:
                     # Zone with detected codes but none with valid prefixes
-                    csv_rows.append({
-                        "Zone_Area": zone_name,
-                        "Furniture_Code": "Invalid codes detected",
-                        "Code_Type": "INVALID",
-                        "Subtotal_Count": 0,
-                        "Notes": f"Codes detected but no valid CH/TB/C/SU/KT prefixes"
-                    })
-            
+                    csv_rows.append(
+                        {
+                            "Zone_Area": zone_name,
+                            "Furniture_Code": "Invalid codes detected",
+                            "Code_Type": "INVALID",
+                            "Subtotal_Count": 0,
+                            "Notes": "Codes detected but no valid CH/TB/C/SU/KT prefixes",
+                        }
+                    )
+
             # Add separator row
-            csv_rows.append({
-                "Zone_Area": "=== GRAND TOTALS ===",
-                "Furniture_Code": "",
-                "Code_Type": "",
-                "Subtotal_Count": "",
-                "Notes": "Summary across all zones"
-            })
-            
+            csv_rows.append(
+                {
+                    "Zone_Area": "=== GRAND TOTALS ===",
+                    "Furniture_Code": "",
+                    "Code_Type": "",
+                    "Subtotal_Count": "",
+                    "Notes": "Summary across all zones",
+                }
+            )
+
             # Add grand totals for each code type
             for code_type in ["CH", "TB", "C", "SU", "KT"]:
                 if grand_totals[code_type] > 0:
-                    csv_rows.append({
-                        "Zone_Area": "ALL ZONES",
-                        "Furniture_Code": f"All {code_type} codes",
-                        "Code_Type": code_type,
-                        "Subtotal_Count": grand_totals[code_type],
-                        "Notes": f"Total {code_type} codes across all zones"
-                    })
-            
+                    csv_rows.append(
+                        {
+                            "Zone_Area": "ALL ZONES",
+                            "Furniture_Code": f"All {code_type} codes",
+                            "Code_Type": code_type,
+                            "Subtotal_Count": grand_totals[code_type],
+                            "Notes": f"Total {code_type} codes across all zones",
+                        }
+                    )
+
             # Add overall summary
             total_codes = sum(grand_totals.values())
-            csv_rows.append({
-                "Zone_Area": "OVERALL TOTAL",
-                "Furniture_Code": "All furniture/joinery codes",
-                "Code_Type": "ALL",
-                "Subtotal_Count": total_codes,
-                "Notes": f"Complete analysis: {len(zone_data)} zones, {total_codes} total codes"
-            })
-            
+            csv_rows.append(
+                {
+                    "Zone_Area": "OVERALL TOTAL",
+                    "Furniture_Code": "All furniture/joinery codes",
+                    "Code_Type": "ALL",
+                    "Subtotal_Count": total_codes,
+                    "Notes": f"Complete analysis: {len(zone_data)} zones, {total_codes} total codes",
+                }
+            )
+
             # Convert to DataFrame and CSV
             if csv_rows:
                 df = pd.DataFrame(csv_rows)
-                csv_string = df.to_csv(index=False, encoding='utf-8')
-                
+                csv_string = df.to_csv(index=False, encoding="utf-8")
+
                 st.success(f"✅ CSV generated: {len(csv_rows)} rows, {total_codes} total codes")
-                st.info(f"📋 Grand totals: CH={grand_totals['CH']}, TB={grand_totals['TB']}, C={grand_totals['C']}, SU={grand_totals['SU']}, KT={grand_totals['KT']}")
-                
+                st.info(
+                    f"📋 Grand totals: CH={grand_totals['CH']}, TB={grand_totals['TB']}, C={grand_totals['C']}, SU={grand_totals['SU']}, KT={grand_totals['KT']}"
+                )
+
                 return csv_string
             else:
                 st.warning("⚠️ No data available for CSV generation")
                 return None
-                
+
         except Exception as e:
             st.error(f"❌ CSV generation failed: {str(e)}")
             return None
@@ -1186,10 +1322,8 @@ def process_uploaded_file_enhanced(uploaded_file):
 
         finally:
             # Clean up
-            try:
+            if temp_filename and os.path.exists(temp_filename):
                 os.unlink(temp_filename)
-            except OSError:
-                pass
 
     except Exception as e:
         return None, f"Error processing file: {str(e)}"
@@ -1309,19 +1443,22 @@ def display_enhanced_results(results):
     # PROPER CSV GENERATION AS PER USER SPECIFICATION
     if results["zones"] or results["codes"]:
         st.subheader("📥 Structured UTF-8 CSV Export")
-        st.info("Generating structured CSV with zones, codes, subtotals per type per zone, and grand totals...")
+        st.info(
+            "Generating structured CSV with zones, codes, subtotals per type per zone, and grand totals..."
+        )
 
         # Generate the REQUIRED CSV structure
-        csv_data = self.generate_structured_csv(results)
-        
+        extractor = EnhancedZoneExtractor()
+        csv_data = extractor.generate_structured_csv(results)
+
         if csv_data:
             st.download_button(
                 label="Download Structured Zone/Codes CSV (UTF-8)",
                 data=csv_data,
                 file_name="zone_furniture_codes_analysis.csv",
                 mime="text/csv",
-            help="Complete analysis with geometric data, confidence scores, and validation",
-        )
+                help="Complete analysis with geometric data, confidence scores, and validation",
+            )
 
 
 def main():
