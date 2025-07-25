@@ -389,6 +389,30 @@ class ZoneMemoryManager:
                 code_type = code_data["code"][:2]  # Get prefix
                 by_type[code_type] += 1
         return dict(by_type)
+    
+    def get_zone_associations(self):
+        """Get zone associations for CSV generation"""
+        associations = {}
+        
+        for zone_id, zone_data in self.zone_registry.items():
+            zone_name = zone_data["name"]
+            
+            # Convert furniture codes to the format expected by CSV generator
+            codes = []
+            for code_data in zone_data["furniture_codes"]:
+                codes.append({
+                    "code": code_data["code"],
+                    "prefix": code_data["code"][:2] if len(code_data["code"]) >= 2 else "",
+                    "confidence": code_data.get("confidence", 0.8)
+                })
+            
+            associations[zone_name] = {
+                "codes": codes,
+                "page": zone_data["page"],
+                "confidence": zone_data["confidence"]
+            }
+        
+        return associations
 
 
 class EnhancedZoneExtractor:
@@ -409,35 +433,69 @@ class EnhancedZoneExtractor:
 
         # Filter out common non-zone words (reduced list, more focused)
         excluded_words = {
-            "THE", "AND", "OR", "IN", "ON", "AT", "TO", "FOR", "OF", "WITH", "BY",
-            "PLAN", "FLOOR", "LEVEL", "SCALE", "DRAWING", "PROJECT", "LEGEND",
-            "PDF", "DPI", "PAGE", "IMAGE", "TEXT", "TITLE", "LABEL", "HEADER", "FOOTER",
-            "NORTH", "SOUTH", "EAST", "WEST", "LEFT", "RIGHT", "TOP", "BOTTOM", "CENTER"
+            "THE",
+            "AND",
+            "OR",
+            "IN",
+            "ON",
+            "AT",
+            "TO",
+            "FOR",
+            "OF",
+            "WITH",
+            "BY",
+            "PLAN",
+            "FLOOR",
+            "LEVEL",
+            "SCALE",
+            "DRAWING",
+            "PROJECT",
+            "LEGEND",
+            "PDF",
+            "DPI",
+            "PAGE",
+            "IMAGE",
+            "TEXT",
+            "TITLE",
+            "LABEL",
+            "HEADER",
+            "FOOTER",
+            "NORTH",
+            "SOUTH",
+            "EAST",
+            "WEST",
+            "LEFT",
+            "RIGHT",
+            "TOP",
+            "BOTTOM",
+            "CENTER",
         }
-        
+
         zone_candidates = []
 
         for match in matches:
             # Clean the match
             clean_match = match.strip()
             words = clean_match.split()
-            
+
             # Skip if too short
             if len(clean_match) < 3:
                 continue
-                
+
             # Skip if all words are excluded
             if all(word in excluded_words for word in words):
                 continue
-            
+
             # Skip obvious furniture codes (they have our prefixes)
-            is_furniture_code = any(clean_match.startswith(prefix) for prefix in ["CH", "TB", "C", "SU", "KT"])
+            is_furniture_code = any(
+                clean_match.startswith(prefix) for prefix in ["CH", "TB", "C", "SU", "KT"]
+            )
             if is_furniture_code:
                 continue
-                
+
             # Calculate confidence based on architectural relevance
             confidence = self._calculate_zone_confidence(clean_match)
-            
+
             # Lower threshold for better zone detection
             if confidence >= confidence_threshold:
                 zone_candidates.append({"name": clean_match, "confidence": confidence})
@@ -451,20 +509,57 @@ class EnhancedZoneExtractor:
         # Enhanced architectural terms based on user examples
         architectural_terms = [
             # Core architectural spaces
-            "HUB", "INNOVATION", "EAT", "LOUNGE", "KITCHEN", "DINING",
-            "OFFICE", "WORKSPACE", "STUDIO", "MEETING", "CONFERENCE", 
-            "LOBBY", "RECEPTION", "ENTRANCE", "EXIT",
+            "HUB",
+            "INNOVATION",
+            "EAT",
+            "LOUNGE",
+            "KITCHEN",
+            "DINING",
+            "OFFICE",
+            "WORKSPACE",
+            "STUDIO",
+            "MEETING",
+            "CONFERENCE",
+            "LOBBY",
+            "RECEPTION",
+            "ENTRANCE",
+            "EXIT",
             # Common spaces
-            "ROOM", "SPACE", "AREA", "ZONE", "HALL", "CORRIDOR",
-            "BATHROOM", "TOILET", "STORAGE", "CLOSET", "PANTRY",
-            # Activity spaces  
-            "PRACTICE", "STUDY", "LIBRARY", "LAB", "CLINIC", "GYM",
-            "THEATER", "GALLERY", "EXHIBITION", "RETAIL", "SHOP",
+            "ROOM",
+            "SPACE",
+            "AREA",
+            "ZONE",
+            "HALL",
+            "CORRIDOR",
+            "BATHROOM",
+            "TOILET",
+            "STORAGE",
+            "CLOSET",
+            "PANTRY",
+            # Activity spaces
+            "PRACTICE",
+            "STUDY",
+            "LIBRARY",
+            "LAB",
+            "CLINIC",
+            "GYM",
+            "THEATER",
+            "GALLERY",
+            "EXHIBITION",
+            "RETAIL",
+            "SHOP",
             # Outdoor/special
-            "GARDEN", "TERRACE", "BALCONY", "COURTYARD", "PATIO",
-            "CAFE", "BAR", "RESTAURANT", "CAFETERIA"
+            "GARDEN",
+            "TERRACE",
+            "BALCONY",
+            "COURTYARD",
+            "PATIO",
+            "CAFE",
+            "BAR",
+            "RESTAURANT",
+            "CAFETERIA",
         ]
-        
+
         # Check for architectural terms (multiple matches possible)
         term_matches = sum(1 for term in architectural_terms if term in zone_name)
         if term_matches > 0:
@@ -478,7 +573,7 @@ class EnhancedZoneExtractor:
         word_count = len(zone_name.split())
         if word_count > 1:
             confidence += 0.15
-            
+
         # Additional boost for very descriptive zones (like "INNOVATION HUB")
         if word_count >= 2 and any(term in zone_name for term in architectural_terms):
             confidence += 0.1
@@ -489,42 +584,159 @@ class EnhancedZoneExtractor:
 
         return min(confidence, 1.0)
 
-    def detect_furniture_codes(self, text, confidence_threshold=0.8):
-        """Enhanced furniture code detection with confidence - handles all variations"""
+    def detect_furniture_codes(self, text, confidence_threshold=0.6):
+        """FUZZY furniture code detection - handles MANY variations beyond examples"""
         furniture_codes = []
 
         for prefix in self.furniture_prefixes:
-            # Enhanced pattern to handle all variations: CH15, CH15A, CH15 a, CH15b, CH21 b
-            # Pattern explanation:
-            # \b{prefix} - word boundary + prefix (CH, TB, C, SU, KT)
-            # \d+ - one or more digits (15, 21, 03, etc.)
-            # (?:\s*[A-Za-z])? - optional space + letter (for "CH15 a", "CH21 b")
-            pattern = rf"\b{prefix}\s*\d+(?:\s*[A-Za-z])?\b"
-            matches = re.findall(pattern, text, re.IGNORECASE)
-
-            for match in matches:
-                # Normalize the code while preserving the format
-                # Remove extra spaces but keep intentional ones
-                normalized_code = re.sub(r'\s+', ' ', match.strip()).upper()
+            # FUZZY/FLEXIBLE patterns for MANY possible variations
+            # Examples given were just samples - this handles MUCH MORE:
+            # Basic: CH15, CH15A, CH15 a, CH15b, CH21 b (given examples)
+            # Separators: CH-15, CH.15, CH_15, CH/15, CH:15
+            # Spacing: CH 15, CH  15, CH   15A
+            # Multiple letters: CH15AA, CH15AB, CH15ABC
+            # Mixed: CH-15A, CH.15 b, CH_15-A, CH/15.2
+            # OCR errors: CH1S (S instead of 5), CHI5 (I instead of 1)
+            # Leading zeros: CH015, CH0015, CH005A
+            
+            patterns = [
+                # Main pattern - very flexible with separators
+                rf"\b{prefix}[-.\s_/:]*\d+[-.\s_/:]*[A-Za-z]*\b",
                 
-                # Further clean for storage (remove spaces)
-                clean_code = re.sub(r'\s+', '', normalized_code)
+                # Allow OCR character substitutions (1→I, 5→S, 0→O)
+                rf"\b{prefix}[-.\s_/:]*[0-9IlOS]+[-.\s_/:]*[A-Za-z]*\b",
+                
+                # Multiple letters and decimal numbers
+                rf"\b{prefix}[-.\s_/]*\d+\.?\d*[-.\s_/]*[A-Za-z]{{1,4}}\b",
+                
+                # Very permissive - any non-alphanumeric separators
+                rf"\b{prefix}[^\w]*[0-9IlOS]+[^\w]*[A-Za-z]*\b",
+                
+                # Handle spaces before prefix (OCR artifacts)
+                rf"\s+{prefix}[-.\s_]*\d+[-.\s_]*[A-Za-z]*\b",
+            ]
+            
+            all_matches = set()  # Use set to avoid duplicates
+            
+            for pattern in patterns:
+                try:
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    for match in matches:
+                        # Only add if it looks like a real code (has digits or digit-like chars)
+                        if re.search(r'[\d0-9IlOS]', match) and len(match.strip()) >= 3:
+                            all_matches.add(match.strip())
+                except:
+                    continue  # Skip if pattern fails
+            
+            # Process all unique matches
+            for match in all_matches:
+                # Flexible normalization - handle many formats
+                normalized_code = self._normalize_furniture_code_fuzzy(match, prefix)
+                
+                if normalized_code:  # Only if normalization succeeded
+                    # Calculate confidence with fuzzy scoring
+                    confidence = self._calculate_fuzzy_code_confidence(normalized_code, match, prefix)
 
-                # Calculate confidence
-                confidence = self._calculate_code_confidence(clean_code, prefix)
-
-                if confidence >= confidence_threshold:
-                    furniture_codes.append(
-                        {
-                            "code": clean_code,  # Clean version for processing
-                            "original": match,   # Original detected text
-                            "normalized": normalized_code,  # Normalized display version
-                            "prefix": prefix, 
-                            "confidence": confidence
-                        }
-                    )
+                    if confidence >= confidence_threshold:
+                        furniture_codes.append(
+                            {
+                                "code": normalized_code,  # Normalized version
+                                "original": match,        # Original detected text
+                                "display": self._format_code_for_display(normalized_code),
+                                "prefix": prefix, 
+                                "confidence": confidence,
+                                "fuzzy_match": True
+                            }
+                        )
 
         return furniture_codes
+
+    def _normalize_furniture_code_fuzzy(self, match, prefix):
+        """Normalize furniture code with fuzzy logic"""
+        try:
+            # Clean the match
+            clean_match = match.strip().upper()
+            
+            # Handle OCR character substitutions
+            clean_match = clean_match.replace('I', '1').replace('l', '1').replace('O', '0').replace('S', '5')
+            
+            # Extract prefix and number part
+            prefix_part = prefix
+            
+            # Find the number part (may have separators)
+            import re
+            number_match = re.search(r'[\d0-9]+', clean_match)
+            if not number_match:
+                return None
+                
+            number_part = number_match.group()
+            
+            # Find letter part (after the number)
+            letter_match = re.search(r'[A-Z]+$', clean_match)
+            letter_part = letter_match.group() if letter_match else ""
+            
+            # Combine into normalized format
+            normalized = f"{prefix_part}{number_part}"
+            if letter_part:
+                normalized += letter_part
+                
+            return normalized
+            
+        except:
+            return None
+    
+    def _calculate_fuzzy_code_confidence(self, normalized_code, original_match, prefix):
+        """Calculate confidence for fuzzy matched codes"""
+        confidence = 0.5  # Base confidence for fuzzy match
+        
+        # Boost for exact prefix match
+        if normalized_code.startswith(prefix):
+            confidence += 0.2
+            
+        # Boost for proper format (prefix + numbers + optional letters)
+        if re.match(rf"^{prefix}\d+[A-Z]*$", normalized_code):
+            confidence += 0.2
+            
+        # Boost for short, clean codes
+        if len(normalized_code) <= 6:
+            confidence += 0.1
+            
+        # Penalize very long codes (likely false positives)
+        if len(normalized_code) > 10:
+            confidence -= 0.2
+            
+        # Boost if original match is clean (no weird characters)
+        if re.match(rf"^{prefix}[\s\d\w]+$", original_match):
+            confidence += 0.1
+            
+        return min(confidence, 1.0)
+    
+    def _format_code_for_display(self, normalized_code):
+        """Format code for display"""
+        if len(normalized_code) <= 2:
+            return normalized_code
+            
+        # Split into prefix, number, letter
+        prefix = normalized_code[:2]
+        rest = normalized_code[2:]
+        
+        # Find where letters start
+        number_part = ""
+        letter_part = ""
+        
+        for i, char in enumerate(rest):
+            if char.isalpha():
+                number_part = rest[:i]
+                letter_part = rest[i:]
+                break
+        else:
+            number_part = rest
+            
+        # Format nicely
+        if letter_part:
+            return f"{prefix}{number_part}{letter_part}"
+        else:
+            return f"{prefix}{number_part}"
 
     def _calculate_code_confidence(self, code, prefix):
         """Calculate confidence score for furniture code"""
@@ -539,16 +751,16 @@ class EnhancedZoneExtractor:
     def associate_detected_codes_to_zones(self, results):
         """Associate detected furniture codes with their corresponding zones"""
         st.info("🔗 Associating furniture codes to zones...")
-        
+
         zones = results.get("zones", [])
         codes = results.get("codes", [])
-        
+
         if not zones or not codes:
             st.warning("⚠️ No zones or codes to associate")
             return
-        
+
         associations_made = 0
-        
+
         for code in codes:
             # Handle both old and new code structure
             code_text = code.get("code", code.get("text", ""))
@@ -556,95 +768,238 @@ class EnhancedZoneExtractor:
             code_bbox = code.get("bbox", {})
             code_x = code_bbox.get("x1", 0) + (code_bbox.get("w", 0) / 2)
             code_y = code_bbox.get("y1", 0) + (code_bbox.get("h", 0) / 2)
-            
+
             closest_zone = None
-            min_distance = float('inf')
-            
+            min_distance = float("inf")
+
             # Find closest zone to this code
             for zone in zones:
                 zone_text = zone.get("text", "")
                 zone_bbox = zone.get("bbox", {})
                 zone_x = zone_bbox.get("x1", 0) + (zone_bbox.get("w", 0) / 2)
                 zone_y = zone_bbox.get("y1", 0) + (zone_bbox.get("h", 0) / 2)
-                
+
                 # Calculate distance
                 distance = ((code_x - zone_x) ** 2 + (code_y - zone_y) ** 2) ** 0.5
-                
+
                 if distance < min_distance:
                     min_distance = distance
                     closest_zone = zone_text
-            
+
             # Associate if reasonable distance (within 500 pixels)
             if closest_zone and min_distance < 500:
                 confidence = code.get("confidence", 0.8)
-                self.memory_manager.associate_furniture_code(
-                    closest_zone, 1, code_text, confidence
-                )
+                self.memory_manager.associate_furniture_code(closest_zone, 1, code_text, confidence)
                 associations_made += 1
-                st.success(f"✅ Associated '{original_text}' → '{code_text}' with zone '{closest_zone}' (distance: {min_distance:.1f}px)")
+                st.success(
+                    f"✅ Associated '{original_text}' → '{code_text}' with zone '{closest_zone}' (distance: {min_distance:.1f}px)"
+                )
             else:
-                st.warning(f"⚠️ Code '{original_text}' too far from any zone (min distance: {min_distance:.1f}px)")
-        
+                st.warning(
+                    f"⚠️ Code '{original_text}' too far from any zone (min distance: {min_distance:.1f}px)"
+                )
+
         st.info(f"🔗 Association complete: {associations_made} codes associated to zones")
+
+    def generate_structured_csv(self, results):
+        """
+        Generate structured UTF-8 CSV files as per user specification:
+        - Each row contains Zone/Area name, extracted furniture/joinery codes (filtered by allowed prefixes)
+        - Code type (CH, TB, C, SU, KT), and subtotal count per code type per zone
+        - Summary rows with grand totals for each unique code type across all zones
+        """
+        try:
+            # Get zones and codes from memory manager (where associations are stored)
+            zone_data = self.memory_manager.get_zone_associations()
+            
+            csv_rows = []
+            
+            # Track grand totals for each code type
+            grand_totals = {
+                "CH": 0,  # Chairs
+                "TB": 0,  # Tables  
+                "C": 0,   # General furniture
+                "SU": 0,  # Storage Units
+                "KT": 0   # Kitchen/joinery
+            }
+            
+            st.info(f"📊 Processing {len(zone_data)} zones for CSV generation...")
+            
+            # Process each zone
+            for zone_name, zone_info in zone_data.items():
+                codes_in_zone = zone_info.get("codes", [])
+                
+                if not codes_in_zone:
+                    # Zone with no codes - still include in CSV
+                    csv_rows.append({
+                        "Zone_Area": zone_name,
+                        "Furniture_Code": "",
+                        "Code_Type": "",
+                        "Subtotal_Count": 0,
+                        "Notes": "No furniture codes detected in this zone"
+                    })
+                    continue
+                
+                # Count codes by type in this zone
+                zone_totals = {"CH": 0, "TB": 0, "C": 0, "SU": 0, "KT": 0}
+                
+                # First pass: count codes by type
+                for code_info in codes_in_zone:
+                    code = code_info.get("code", "")
+                    prefix = code_info.get("prefix", "")
+                    
+                    # Filter by allowed prefixes only
+                    if prefix in ["CH", "TB", "C", "SU", "KT"]:
+                        zone_totals[prefix] += 1
+                        grand_totals[prefix] += 1
+                
+                # Second pass: generate rows for each code type found in this zone
+                zone_has_codes = False
+                for code_type in ["CH", "TB", "C", "SU", "KT"]:
+                    if zone_totals[code_type] > 0:
+                        zone_has_codes = True
+                        
+                        # Get example codes of this type
+                        example_codes = [
+                            code_info.get("code", "") 
+                            for code_info in codes_in_zone 
+                            if code_info.get("prefix", "") == code_type
+                        ]
+                        
+                        csv_rows.append({
+                            "Zone_Area": zone_name,
+                            "Furniture_Code": ", ".join(example_codes[:5]),  # Show up to 5 examples
+                            "Code_Type": code_type,
+                            "Subtotal_Count": zone_totals[code_type],
+                            "Notes": f"{zone_totals[code_type]} {code_type} codes detected"
+                        })
+                
+                if not zone_has_codes:
+                    # Zone with detected codes but none with valid prefixes
+                    csv_rows.append({
+                        "Zone_Area": zone_name,
+                        "Furniture_Code": "Invalid codes detected",
+                        "Code_Type": "INVALID",
+                        "Subtotal_Count": 0,
+                        "Notes": f"Codes detected but no valid CH/TB/C/SU/KT prefixes"
+                    })
+            
+            # Add separator row
+            csv_rows.append({
+                "Zone_Area": "=== GRAND TOTALS ===",
+                "Furniture_Code": "",
+                "Code_Type": "",
+                "Subtotal_Count": "",
+                "Notes": "Summary across all zones"
+            })
+            
+            # Add grand totals for each code type
+            for code_type in ["CH", "TB", "C", "SU", "KT"]:
+                if grand_totals[code_type] > 0:
+                    csv_rows.append({
+                        "Zone_Area": "ALL ZONES",
+                        "Furniture_Code": f"All {code_type} codes",
+                        "Code_Type": code_type,
+                        "Subtotal_Count": grand_totals[code_type],
+                        "Notes": f"Total {code_type} codes across all zones"
+                    })
+            
+            # Add overall summary
+            total_codes = sum(grand_totals.values())
+            csv_rows.append({
+                "Zone_Area": "OVERALL TOTAL",
+                "Furniture_Code": "All furniture/joinery codes",
+                "Code_Type": "ALL",
+                "Subtotal_Count": total_codes,
+                "Notes": f"Complete analysis: {len(zone_data)} zones, {total_codes} total codes"
+            })
+            
+            # Convert to DataFrame and CSV
+            if csv_rows:
+                df = pd.DataFrame(csv_rows)
+                csv_string = df.to_csv(index=False, encoding='utf-8')
+                
+                st.success(f"✅ CSV generated: {len(csv_rows)} rows, {total_codes} total codes")
+                st.info(f"📋 Grand totals: CH={grand_totals['CH']}, TB={grand_totals['TB']}, C={grand_totals['C']}, SU={grand_totals['SU']}, KT={grand_totals['KT']}")
+                
+                return csv_string
+            else:
+                st.warning("⚠️ No data available for CSV generation")
+                return None
+                
+        except Exception as e:
+            st.error(f"❌ CSV generation failed: {str(e)}")
+            return None
 
     def merge_fragmented_text(self, word_positions):
         """Merge fragmented text that should be single zones"""
         if not word_positions:
             return word_positions
-        
+
         merged_positions = []
         used_indices = set()
-        
+
         for i, word in enumerate(word_positions):
             if i in used_indices:
                 continue
-                
+
             # Check if this word should be merged with nearby words
             if word["text"].isupper() and len(word["text"]) > 2:
                 merged_text = word["text"]
-                merged_bbox = {
-                    "x1": word["x"],
-                    "y1": word["y"], 
-                    "w": word["w"],
-                    "h": word["h"]
-                }
+                merged_bbox = {"x1": word["x"], "y1": word["y"], "w": word["w"], "h": word["h"]}
                 merged_confidence = word["confidence"]
                 group_indices = [i]
-                
+
                 # Look for nearby words to merge
                 for j, other_word in enumerate(word_positions):
                     if j != i and j not in used_indices and other_word["text"].isupper():
                         # Check if words are close enough (within 50 pixels vertically or horizontally)
                         x_distance = abs(word["x"] - other_word["x"])
                         y_distance = abs(word["y"] - other_word["y"])
-                        
-                        if (x_distance < 200 and y_distance < 50) or (y_distance < 200 and x_distance < 50):
+
+                        if (x_distance < 200 and y_distance < 50) or (
+                            y_distance < 200 and x_distance < 50
+                        ):
                             merged_text += " " + other_word["text"]
                             merged_bbox["x1"] = min(merged_bbox["x1"], other_word["x"])
                             merged_bbox["y1"] = min(merged_bbox["y1"], other_word["y"])
-                            merged_bbox["w"] = max(merged_bbox["x1"] + merged_bbox["w"], other_word["x"] + other_word["w"]) - merged_bbox["x1"]
-                            merged_bbox["h"] = max(merged_bbox["y1"] + merged_bbox["h"], other_word["y"] + other_word["h"]) - merged_bbox["y1"]
+                            merged_bbox["w"] = (
+                                max(
+                                    merged_bbox["x1"] + merged_bbox["w"],
+                                    other_word["x"] + other_word["w"],
+                                )
+                                - merged_bbox["x1"]
+                            )
+                            merged_bbox["h"] = (
+                                max(
+                                    merged_bbox["y1"] + merged_bbox["h"],
+                                    other_word["y"] + other_word["h"],
+                                )
+                                - merged_bbox["y1"]
+                            )
                             merged_confidence = max(merged_confidence, other_word["confidence"])
                             group_indices.append(j)
-                
+
                 # Mark all used indices
                 for idx in group_indices:
                     used_indices.add(idx)
-                
+
                 # Add merged word
-                merged_positions.append({
-                    "text": merged_text.strip(),
-                    "x": merged_bbox["x1"],
-                    "y": merged_bbox["y1"],
-                    "w": merged_bbox["w"],
-                    "h": merged_bbox["h"],
-                    "confidence": merged_confidence
-                })
+                merged_positions.append(
+                    {
+                        "text": merged_text.strip(),
+                        "x": merged_bbox["x1"],
+                        "y": merged_bbox["y1"],
+                        "w": merged_bbox["w"],
+                        "h": merged_bbox["h"],
+                        "confidence": merged_confidence,
+                    }
+                )
             else:
                 # Keep individual word
                 used_indices.add(i)
                 merged_positions.append(word)
-        
+
         return merged_positions
 
     def process_pdf_enhanced(self, pdf_path):
@@ -733,7 +1088,7 @@ class EnhancedZoneExtractor:
                                     "confidence": int(data["conf"][i]) / 100.0,
                                 }
                             )
-                    
+
                     # Fix text fragmentation by merging nearby words
                     word_positions = self.merge_fragmented_text(word_positions)
 
@@ -788,7 +1143,7 @@ class EnhancedZoneExtractor:
 
             # CRITICAL: Associate codes to zones (was missing!)
             self.associate_detected_codes_to_zones(results)
-            
+
             # Final validation and summary
             results["processing_summary"] = self.memory_manager.get_processing_summary()
             results["validation"] = self.memory_manager.validate_completeness()
@@ -951,59 +1306,20 @@ def display_enhanced_results(results):
                 else:
                     st.success("✅ No validation issues found")
 
-    # Enhanced CSV export
+    # PROPER CSV GENERATION AS PER USER SPECIFICATION
     if results["zones"] or results["codes"]:
-        st.subheader("📥 Enhanced Export")
+        st.subheader("📥 Structured UTF-8 CSV Export")
+        st.info("Generating structured CSV with zones, codes, subtotals per type per zone, and grand totals...")
 
-        # Create comprehensive export data
-        export_data = []
-
-        # Add zones and codes with enhanced metadata
-        for zone in results["zones"]:
-            export_data.append(
-                {
-                    "Type": "Zone",
-                    "Page": zone["page"],
-                    "Name/Code": zone["zone_area"],
-                    "Category": "Zone/Area",
-                    "Method": zone["method"],
-                    "Confidence": zone.get("confidence", "N/A"),
-                }
-            )
-
-        for code in results["codes"]:
-            export_data.append(
-                {
-                    "Type": "Furniture Code",
-                    "Page": code["page"],
-                    "Name/Code": code["code"],
-                    "Category": code["code_type"],
-                    "Method": code["method"],
-                    "Confidence": code.get("confidence", "N/A"),
-                }
-            )
-
-        # Add summary statistics
-        if validation:
-            export_data.append(
-                {
-                    "Type": "=== SUMMARY ===",
-                    "Page": "ALL",
-                    "Name/Code": f"Total Zones: {validation.get('total_zones', 0)}",
-                    "Category": "Summary",
-                    "Method": "Calculated",
-                    "Confidence": f"Avg: {validation.get('avg_confidence', 0):.2f}",
-                }
-            )
-
-        export_df = pd.DataFrame(export_data)
-        csv = export_df.to_csv(index=False)
-
-        st.download_button(
-            label="Download Enhanced Analysis Report (CSV)",
-            data=csv,
-            file_name="enhanced_architectural_analysis.csv",
-            mime="text/csv",
+        # Generate the REQUIRED CSV structure
+        csv_data = self.generate_structured_csv(results)
+        
+        if csv_data:
+            st.download_button(
+                label="Download Structured Zone/Codes CSV (UTF-8)",
+                data=csv_data,
+                file_name="zone_furniture_codes_analysis.csv",
+                mime="text/csv",
             help="Complete analysis with geometric data, confidence scores, and validation",
         )
 
