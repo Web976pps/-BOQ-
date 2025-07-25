@@ -954,6 +954,30 @@ class EnhancedZoneExtractor:
         
         return best_match
 
+    def _find_text_coordinates(self, search_text, word_positions):
+        """Find coordinates for detected text in OCR word positions"""
+        search_text_upper = search_text.upper().strip()
+        
+        # Try exact match first
+        for word_data in word_positions:
+            word_text = word_data.get('text', '').strip().upper()
+            if word_text == search_text_upper:
+                return {"x": word_data.get('x', 0), "y": word_data.get('y', 0)}
+        
+        # Try partial match for multi-word zones
+        search_words = search_text_upper.split()
+        for word_data in word_positions:
+            word_text = word_data.get('text', '').strip().upper()
+            # Check if any search word is in the OCR word
+            if any(search_word in word_text for search_word in search_words if len(search_word) > 2):
+                return {"x": word_data.get('x', 0), "y": word_data.get('y', 0)}
+            # Check if OCR word is in any search word
+            if any(word_text in search_word for search_word in search_words if len(word_text) > 2):
+                return {"x": word_data.get('x', 0), "y": word_data.get('y', 0)}
+        
+        # Default coordinates if not found
+        return {"x": 0, "y": 0}
+
     def _associate_with_smart_matching(self, results):
         """Enhanced association using smart text matching"""
         zones = results.get("zones", [])
@@ -1500,114 +1524,165 @@ class EnhancedZoneExtractor:
             for page_num in range(min(num_pages, 5)):  # Limit for performance
                 st.progress((page_num + 1) / min(num_pages, 5), f"Processing page {page_num + 1}")
 
-                # Convert to safe resolution image with enhanced error handling
-                images = None
-                dpi_attempts = [safe_dpi]
-
-                # Add fallback DPI values
-                if safe_dpi > 200:
-                    dpi_attempts.append(200)
-                if safe_dpi > 150:
-                    dpi_attempts.append(150)
-
-                for attempt_dpi in dpi_attempts:
-                    try:
-                        st.info(f"🔄 Attempting conversion at {attempt_dpi} DPI...")
-                        images = convert_from_path(
-                            pdf_path,
-                            first_page=page_num + 1,
-                            last_page=page_num + 1,
-                            dpi=attempt_dpi,
-                        )
-                        if images:
-                            if attempt_dpi != safe_dpi:
-                                st.success(
-                                    f"✅ Conversion successful at fallback {attempt_dpi} DPI"
-                                )
-                            break
-                    except Exception as conversion_error:
-                        error_msg = str(conversion_error)
-                        if "exceeds limit" in error_msg or "pixels" in error_msg:
-                            st.warning(f"⚠️ DPI {attempt_dpi} still too large: {error_msg}")
+                # First try direct text extraction from PDF (for text-based PDFs)
+                direct_text = ""
+                word_positions = []
+                
+                try:
+                    with pdfplumber.open(pdf_path) as pdf:
+                        page = pdf.pages[page_num]
+                        direct_text = page.extract_text()
+                        
+                        if direct_text and direct_text.strip():
+                            st.success(f"✅ Direct text extraction successful for page {page_num + 1}")
+                            
+                            # Use direct text for detection
+                            text = direct_text
+                            
+                            # Create mock word positions for direct text (no precise coordinates available)
+                            words = text.split()
+                            for i, word in enumerate(words):
+                                if word.strip():
+                                    word_positions.append({
+                                        "text": word,
+                                        "x": i * 50,  # Mock x position
+                                        "y": 50,      # Mock y position  
+                                        "w": len(word) * 10,  # Mock width
+                                        "h": 20,      # Mock height
+                                        "confidence": 1.0,
+                                    })
+                            
+                            # Skip OCR and go directly to detection
+                            skip_ocr = True
                         else:
-                            st.warning(f"⚠️ Conversion failed at {attempt_dpi} DPI: {error_msg}")
+                            skip_ocr = False
+                            st.info(f"📄 No direct text found, falling back to OCR for page {page_num + 1}")
+                            
+                except Exception as e:
+                    skip_ocr = False
+                    st.warning(f"⚠️ Direct text extraction failed, using OCR: {e}")
+
+                if not skip_ocr:
+                    # Convert to safe resolution image with enhanced error handling
+                    images = None
+                    dpi_attempts = [safe_dpi]
+
+                    # Add fallback DPI values
+                    if safe_dpi > 200:
+                        dpi_attempts.append(200)
+                    if safe_dpi > 150:
+                        dpi_attempts.append(150)
+
+                    for attempt_dpi in dpi_attempts:
+                        try:
+                            st.info(f"🔄 Attempting conversion at {attempt_dpi} DPI...")
+                            images = convert_from_path(
+                                pdf_path,
+                                first_page=page_num + 1,
+                                last_page=page_num + 1,
+                                dpi=attempt_dpi,
+                            )
+                            if images:
+                                if attempt_dpi != safe_dpi:
+                                    st.success(
+                                        f"✅ Conversion successful at fallback {attempt_dpi} DPI"
+                                    )
+                                break
+                        except Exception as conversion_error:
+                            error_msg = str(conversion_error)
+                            if "exceeds limit" in error_msg or "pixels" in error_msg:
+                                st.warning(f"⚠️ DPI {attempt_dpi} still too large: {error_msg}")
+                            else:
+                                st.warning(f"⚠️ Conversion failed at {attempt_dpi} DPI: {error_msg}")
+                            continue
+
+                    if not images:
+                        st.error(f"❌ All conversion attempts failed for page {page_num + 1}")
                         continue
 
-                if not images:
-                    st.error(f"❌ All conversion attempts failed for page {page_num + 1}")
-                    continue
+                    image = images[0]
 
-                image = images[0]
+                    # Enhanced image processing
+                    image = self.pdf_processor.enhance_image_quality(image)
+                    image = self.pdf_processor.correct_orientation(image)
 
-                # Enhanced image processing
-                image = self.pdf_processor.enhance_image_quality(image)
-                image = self.pdf_processor.correct_orientation(image)
+                    # OCR with enhanced configuration
+                    img_array = np.array(image)
+                    custom_config = r"--oem 3 --psm 11 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
 
-                # OCR with enhanced configuration
-                img_array = np.array(image)
-                custom_config = r"--oem 3 --psm 11 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+                    try:
+                        # Extract text and positions
+                        text = pytesseract.image_to_string(img_array, config=custom_config)
+                        data = pytesseract.image_to_data(
+                            img_array, config=custom_config, output_type=pytesseract.Output.DICT
+                        )
 
-                try:
-                    # Extract text and positions
-                    text = pytesseract.image_to_string(img_array, config=custom_config)
-                    data = pytesseract.image_to_data(
-                        img_array, config=custom_config, output_type=pytesseract.Output.DICT
+                        # Build word positions
+                        word_positions = []
+                        for i, word in enumerate(data["text"]):
+                            if int(data["conf"][i]) > 30 and word.strip():
+                                word_positions.append(
+                                    {
+                                        "text": word,
+                                        "x": data["left"][i],
+                                        "y": data["top"][i],
+                                        "w": data["width"][i],
+                                        "h": data["height"][i],
+                                        "confidence": int(data["conf"][i]) / 100.0,
+                                    }
+                                )
+
+                        # Fix text fragmentation by merging nearby words
+                        word_positions = self.merge_fragmented_text(word_positions)
+                    except Exception as ocr_error:
+                        st.error(f"❌ OCR failed for page {page_num + 1}: {ocr_error}")
+                        continue
+
+                # Store word position data for association (works for both direct text and OCR)
+                if "ocr_data" not in results:
+                    results["ocr_data"] = []
+                results["ocr_data"].extend(word_positions)
+
+                # Detect zones and codes with confidence (works for both direct text and OCR)
+                zone_candidates = self.detect_all_caps_zones(text)
+                code_candidates = self.detect_furniture_codes(text)
+
+                # Register zones in memory manager
+                for zone in zone_candidates:
+                    self.memory_manager.register_zone(
+                        zone["name"], page_num + 1, "enhanced_ocr", zone["confidence"]
+                    )
+                    # Find coordinates for this zone text in OCR data
+                    zone_coords = self._find_text_coordinates(zone["name"], word_positions)
+                    results["zones"].append(
+                        {
+                            "page": page_num + 1,
+                            "zone_area": zone["name"],
+                            "method": "enhanced_ocr",
+                            "confidence": zone["confidence"],
+                            "x": zone_coords["x"],
+                            "y": zone_coords["y"],
+                        }
                     )
 
-                    # Build word positions
-                    word_positions = []
-                    for i, word in enumerate(data["text"]):
-                        if int(data["conf"][i]) > 30 and word.strip():
-                            word_positions.append(
-                                {
-                                    "text": word,
-                                    "x": data["left"][i],
-                                    "y": data["top"][i],
-                                    "w": data["width"][i],
-                                    "h": data["height"][i],
-                                    "confidence": int(data["conf"][i]) / 100.0,
-                                }
-                            )
+                # Register codes
+                for code in code_candidates:
+                    # Find coordinates for this code text in OCR data
+                    code_coords = self._find_text_coordinates(code["code"], word_positions)
+                    results["codes"].append(
+                        {
+                            "page": page_num + 1,
+                            "code": code["code"],
+                            "code_type": code["prefix"],
+                            "method": "enhanced_ocr",
+                            "confidence": code["confidence"],
+                            "x": code_coords["x"],
+                            "y": code_coords["y"],
+                                                    }
+                    )
 
-                    # Fix text fragmentation by merging nearby words
-                    word_positions = self.merge_fragmented_text(word_positions)
-
-                    # Store OCR data for association (CRITICAL FIX)
-                    if "ocr_data" not in results:
-                        results["ocr_data"] = []
-                    results["ocr_data"].extend(word_positions)
-
-                    # Detect zones and codes with confidence
-                    zone_candidates = self.detect_all_caps_zones(text)
-                    code_candidates = self.detect_furniture_codes(text)
-
-                    # Register zones in memory manager
-                    for zone in zone_candidates:
-                        self.memory_manager.register_zone(
-                            zone["name"], page_num + 1, "enhanced_ocr", zone["confidence"]
-                        )
-                        results["zones"].append(
-                            {
-                                "page": page_num + 1,
-                                "zone_area": zone["name"],
-                                "method": "enhanced_ocr",
-                                "confidence": zone["confidence"],
-                            }
-                        )
-
-                    # Register codes
-                    for code in code_candidates:
-                        results["codes"].append(
-                            {
-                                "page": page_num + 1,
-                                "code": code["code"],
-                                "code_type": code["prefix"],
-                                "method": "enhanced_ocr",
-                                "confidence": code["confidence"],
-                            }
-                        )
-
-                    # Geometric analysis
+                # Geometric analysis (only if we have an image from OCR)
+                if not skip_ocr:
                     contours, edges = self.geometric_analyzer.detect_wall_contours(image)
                     clusters = self.geometric_analyzer.dbscan_zone_clustering(
                         word_positions, contours
@@ -1622,10 +1697,6 @@ class EnhancedZoneExtractor:
                         "zone_polygons": len(zone_polygons),
                     }
 
-                except Exception as e:
-                    st.warning(f"Enhanced OCR failed for page {page_num + 1}: {str(e)}")
-                    continue
-
             # CRITICAL: Store OCR position data for association
             ocr_data = results.get("ocr_data", [])
             if ocr_data:
@@ -1638,6 +1709,7 @@ class EnhancedZoneExtractor:
                 st.write(f"📊 Codes detected: {len(results['codes'])}")
                 
                 # Add position data to zones and codes
+
                 for zone in results['zones']:
                     zone_text = zone.get('zone_area', zone.get('text', ''))
                     # Find position for zone words
