@@ -454,6 +454,7 @@ class ZoneMemoryManager:
     def associate_furniture_code(self, zone_name, page_num, furniture_code, confidence=1.0):
         """Associate furniture code with zone"""
         zone_id = f"{page_num}_{zone_name}"
+        logger.debug(f"Agent 3: Attempting to associate code '{furniture_code}' with zone_id '{zone_id}'")
 
         if zone_id in self.zone_registry:
             self.zone_registry[zone_id]["furniture_codes"].append(
@@ -472,7 +473,23 @@ class ZoneMemoryManager:
                     logger.debug(f"Agent 2: Removed duplicate code '{code_text}' from zone '{zone_name}'")
             
             self.zone_registry[zone_id]["furniture_codes"] = unique_codes
-            logger.debug(f"Agent 2: Zone '{zone_name}' now has {len(unique_codes)} unique codes")
+            logger.debug(f"Agent 3: SUCCESS - Zone '{zone_name}' (ID: '{zone_id}') now has {len(unique_codes)} unique codes")
+        else:
+            # Agent 3 CRITICAL FIX: Handle missing zone case
+            logger.error(f"Agent 3: CRITICAL - Zone ID '{zone_id}' not found in registry!")
+            logger.error(f"Agent 3: Available zone IDs: {list(self.zone_registry.keys())}")
+            
+            # Try to find similar zone names
+            for existing_id, zone_data in self.zone_registry.items():
+                if zone_data["name"] == zone_name or zone_name in zone_data["name"]:
+                    logger.warning(f"Agent 3: Found similar zone - using '{existing_id}' instead")
+                    self.zone_registry[existing_id]["furniture_codes"].append(
+                        {"code": furniture_code, "confidence": confidence, "timestamp": datetime.now()}
+                    )
+                    zone_id = existing_id  # Update for logging
+                    break
+            else:
+                logger.error(f"Agent 3: FAILED - No similar zone found for '{zone_name}'. Association lost!")
 
         self.processing_log.append(
             {
