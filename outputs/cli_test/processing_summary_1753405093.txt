@@ -1,0 +1,18 @@
+Enhanced A1 PDF Zones/Codes Extractor - Processing Summary
+============================================================
+
+Input PDF: architectural_test.pdf
+File Size: 3,072 bytes
+Processing Time: 8.24 seconds
+DPI: 600
+Confidence Threshold: 0.5
+
+Results:
+  Zones detected: 3
+  Codes detected: 4
+
+Validation Summary:
+  Total zones: 3
+  Zones with codes: 0
+  Average confidence: 0.97
+  Issues: 3

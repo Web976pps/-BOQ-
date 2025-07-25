@@ -1,0 +1,18 @@
+Enhanced A1 PDF Zones/Codes Extractor - Processing Summary
+============================================================
+
+Input PDF: input/sample.pdf
+File Size: 3,072 bytes
+Processing Time: 3.30 seconds
+DPI: 300
+Confidence Threshold: 0.3
+
+Results:
+  Zones detected: 3
+  Codes detected: 4
+
+Validation Summary:
+  Total zones: 3
+  Zones with codes: 0
+  Average confidence: 0.97
+  Issues: 3
