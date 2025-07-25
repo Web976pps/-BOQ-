@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-
 from pdf_code_extractor.export import write_csvs, write_overlays
 from pdf_code_extractor.normalize import apply as normalize_apply
 from pdf_code_extractor.ocr_codes import detect as detect_codes
@@ -19,6 +18,7 @@ from pdf_code_extractor.preprocess import load_and_enhance
 from pdf_code_extractor.raster import pdf_to_pngs
 from pdf_code_extractor.spatial import assign
 from pdf_code_extractor.validate import run as validate_run
+
 from utils.config import load_config
 from utils.logging import setup_logging
 

@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-
 from pdf_code_extractor.preprocess import _deskew
 
 

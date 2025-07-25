@@ -15,7 +15,7 @@ During the code review, I identified and fixed 3 critical bugs in the applicatio
 ### **Description**
 The PDF processing function lacked proper error handling for:
 - Corrupted or malformed PDF files
-- Password-protected/encrypted PDFs  
+- Password-protected/encrypted PDFs
 - Page extraction failures
 - PyPDF2 specific errors
 
@@ -39,12 +39,12 @@ for page_num in range(len(reader.pages)):
 # After: Comprehensive error handling
 try:
     reader = PyPDF2.PdfReader(pdf_file)
-    
+
     # Check if PDF is encrypted
     if reader.is_encrypted:
         st.warning("PDF is password-protected. Please provide an unencrypted PDF.")
         return zones
-        
+
     for page_num in range(len(reader.pages)):
         try:
             page = reader.pages[page_num]
@@ -53,7 +53,7 @@ try:
         except Exception as e:
             st.warning(f"Could not process page {page_num + 1}: {str(e)}")
             continue
-            
+
 except PyPDF2.errors.PdfReadError as e:
     st.error(f"Error reading PDF with PyPDF2: {str(e)}")
 except Exception as e:
@@ -76,7 +76,7 @@ except Exception as e:
 The function created three unnecessary copies of text strings from each PDF page:
 ```python
 text_copy1 = text + ""
-text_copy2 = str(text)  
+text_copy2 = str(text)
 text_copy3 = "".join(list(text))
 ```
 
@@ -224,7 +224,7 @@ To verify the fixes and prevent regression:
 
 The three bugs fixed represent critical issues that could impact:
 - **Application Stability** (Bug 1)
-- **Performance & Scalability** (Bug 2)  
+- **Performance & Scalability** (Bug 2)
 - **Security & Privacy** (Bug 3)
 
 These fixes significantly improve the robustness, security, and performance of the PDF extractor application. The remaining identified bugs should be addressed in future development cycles to further enhance the application's quality and reliability.
