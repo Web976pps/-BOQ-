@@ -1522,6 +1522,7 @@ class EnhancedZoneExtractor:
                     continue
 
             # CRITICAL: Store OCR position data for association
+            ocr_data = results.get("ocr_data", [])
             if ocr_data:
                 # Ensure we have position data before association
                 st.info("🔗 Preparing OCR position data for association...")
