@@ -840,35 +840,76 @@ class EnhancedZoneExtractor:
         return min(confidence, 1.0)
 
     def associate_detected_codes_to_zones(self, results):
-        """Associate detected furniture codes with their corresponding zones"""
+        """Associate detected furniture codes with their corresponding zones using OCR positions"""
         st.info("🔗 Associating furniture codes to zones...")
 
         zones = results.get("zones", [])
         codes = results.get("codes", [])
+        ocr_data = results.get("ocr_data", [])
 
         if not zones or not codes:
             st.warning("⚠️ No zones or codes to associate")
             return
 
+        if not ocr_data:
+            st.warning("⚠️ No OCR position data available for association")
+            return
+
         associations_made = 0
+
+        # Create position lookup for OCR words
+        word_positions = {}
+        for word_data in ocr_data:
+            word_text = word_data.get("text", "").strip().upper()
+            if word_text:
+                word_positions[word_text] = {
+                    "x": word_data.get("x", 0),
+                    "y": word_data.get("y", 0),
+                    "w": word_data.get("w", 0),
+                    "h": word_data.get("h", 0),
+                }
 
         for code in codes:
             # Handle both old and new code structure
             code_text = code.get("code", code.get("text", ""))
             original_text = code.get("original", code_text)
-            code_bbox = code.get("bbox", {})
-            code_x = code_bbox.get("x1", 0) + (code_bbox.get("w", 0) / 2)
-            code_y = code_bbox.get("y1", 0) + (code_bbox.get("h", 0) / 2)
+
+            # Find position of this code in OCR data
+            code_position = None
+            for search_text in [original_text, code_text]:
+                if search_text.upper() in word_positions:
+                    code_position = word_positions[search_text.upper()]
+                    break
+
+            if not code_position:
+                st.warning(f"⚠️ Code '{original_text}' position not found in OCR data")
+                continue
+
+            code_x = code_position["x"] + (code_position["w"] / 2)
+            code_y = code_position["y"] + (code_position["h"] / 2)
 
             closest_zone = None
             min_distance = float("inf")
 
             # Find closest zone to this code
             for zone in zones:
-                zone_text = zone.get("text", "")
-                zone_bbox = zone.get("bbox", {})
-                zone_x = zone_bbox.get("x1", 0) + (zone_bbox.get("w", 0) / 2)
-                zone_y = zone_bbox.get("y1", 0) + (zone_bbox.get("h", 0) / 2)
+                zone_text = zone.get("text", zone.get("name", ""))
+
+                # Find position of this zone in OCR data
+                zone_position = None
+                zone_words = zone_text.split()
+
+                # Try to find any word from the zone name
+                for zone_word in zone_words:
+                    if zone_word.upper() in word_positions:
+                        zone_position = word_positions[zone_word.upper()]
+                        break
+
+                if not zone_position:
+                    continue
+
+                zone_x = zone_position["x"] + (zone_position["w"] / 2)
+                zone_y = zone_position["y"] + (zone_position["h"] / 2)
 
                 # Calculate distance
                 distance = ((code_x - zone_x) ** 2 + (code_y - zone_y) ** 2) ** 0.5
@@ -1227,6 +1268,11 @@ class EnhancedZoneExtractor:
 
                     # Fix text fragmentation by merging nearby words
                     word_positions = self.merge_fragmented_text(word_positions)
+
+                    # Store OCR data for association (CRITICAL FIX)
+                    if "ocr_data" not in results:
+                        results["ocr_data"] = []
+                    results["ocr_data"].extend(word_positions)
 
                     # Detect zones and codes with confidence
                     zone_candidates = self.detect_all_caps_zones(text)
