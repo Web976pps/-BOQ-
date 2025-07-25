@@ -919,56 +919,73 @@ class EnhancedZoneExtractor:
             code_text = code.get("code", code.get("text", ""))
             original_text = code.get("original", code_text)
 
-            # Find position of this code in OCR data
-            code_position = None
-            for search_text in [original_text, code_text]:
-                if search_text.upper() in word_positions:
-                    code_position = word_positions[search_text.upper()]
-                    break
+            # ENHANCED: Get position from bbox first, then OCR data
+            code_x, code_y = None, None
+            code_bbox = code.get("bbox", {})
+            
+            if code_bbox and code_bbox.get("x") is not None:
+                code_x = code_bbox["x"] + code_bbox.get("w", 0) // 2
+                code_y = code_bbox["y"] + code_bbox.get("h", 0) // 2
+                st.info(f"📍 Code '{code_text}' position from bbox: ({code_x}, {code_y})")
+            else:
+                # Find position of this code in OCR data
+                code_position = None
+                for search_text in [original_text, code_text]:
+                    if search_text.upper() in word_positions:
+                        code_position = word_positions[search_text.upper()]
+                        break
 
-            if not code_position:
-                # ENHANCED: Try to find position by partial text matching
-                partial_matches = [
-                    text
-                    for text in word_positions
-                    if original_text.upper() in text or text in original_text.upper()
-                ]
-                if partial_matches:
-                    code_position = word_positions[partial_matches[0]]
-                    st.info(
-                        f"📍 Found code '{original_text}' via partial match: '{partial_matches[0]}'"
-                    )
-                else:
-                    st.warning(
-                        f"⚠️ Code '{original_text}' position not found in OCR data (skipping association)"
-                    )
-                    continue
+                if not code_position:
+                    # ENHANCED: Try to find position by partial text matching
+                    partial_matches = [
+                        text
+                        for text in word_positions
+                        if original_text.upper() in text or text in original_text.upper()
+                    ]
+                    if partial_matches:
+                        code_position = word_positions[partial_matches[0]]
+                        st.info(
+                            f"📍 Found code '{original_text}' via partial match: '{partial_matches[0]}'"
+                        )
+                    else:
+                        st.warning(
+                            f"⚠️ Code '{original_text}' position not found in OCR data (skipping association)"
+                        )
+                        continue
 
-            code_x = code_position["x"] + (code_position["w"] / 2)
-            code_y = code_position["y"] + (code_position["h"] / 2)
+                code_x = code_position["x"] + (code_position["w"] / 2)
+                code_y = code_position["y"] + (code_position["h"] / 2)
 
             closest_zone = None
             min_distance = float("inf")
 
             # Find closest zone to this code
             for zone in zones:
-                zone_text = zone.get("text", zone.get("name", ""))
+                zone_text = zone.get("zone_area", zone.get("text", zone.get("name", "")))
 
-                # Find position of this zone in OCR data
-                zone_position = None
-                zone_words = zone_text.split()
+                # ENHANCED: Get zone position from bbox first, then OCR data
+                zone_x, zone_y = None, None
+                zone_bbox = zone.get("bbox", {})
+                
+                if zone_bbox and zone_bbox.get("x") is not None:
+                    zone_x = zone_bbox["x"] + zone_bbox.get("w", 0) // 2
+                    zone_y = zone_bbox["y"] + zone_bbox.get("h", 0) // 2
+                else:
+                    # Find position of this zone in OCR data
+                    zone_position = None
+                    zone_words = zone_text.split()
 
-                # Try to find any word from the zone name
-                for zone_word in zone_words:
-                    if zone_word.upper() in word_positions:
-                        zone_position = word_positions[zone_word.upper()]
-                        break
+                    # Try to find any word from the zone name
+                    for zone_word in zone_words:
+                        if len(zone_word) > 2 and zone_word.upper() in word_positions:
+                            zone_position = word_positions[zone_word.upper()]
+                            break
 
-                if not zone_position:
-                    continue
+                    if not zone_position:
+                        continue
 
-                zone_x = zone_position["x"] + (zone_position["w"] / 2)
-                zone_y = zone_position["y"] + (zone_position["h"] / 2)
+                    zone_x = zone_position["x"] + (zone_position["w"] / 2)
+                    zone_y = zone_position["y"] + (zone_position["h"] / 2)
 
                 # Calculate distance
                 distance = ((code_x - zone_x) ** 2 + (code_y - zone_y) ** 2) ** 0.5
@@ -986,13 +1003,14 @@ class EnhancedZoneExtractor:
                 # Check if any zone polygons contain this code point
                 code_point = Point(code_x, code_y)
                 for zone in zones:
-                    zone_text = zone.get("text", "")
+                    zone_text = zone.get("zone_area", zone.get("text", ""))
                     zone_data = zone.get("shapely_polygon")
 
                     if zone_data and zone_data.contains(code_point):
                         confidence = code.get("confidence", 0.8)
+                        page_num = code.get("page", 1)
                         self.memory_manager.associate_furniture_code(
-                            zone_text, 1, code_text, confidence
+                            zone_text, page_num, code_text, confidence
                         )
                         associations_made += 1
                         association_made = True
@@ -1005,9 +1023,10 @@ class EnhancedZoneExtractor:
                 pass  # Fall back to distance method
 
             # Fall back to distance-based association if geometric containment failed
-            if not association_made and closest_zone and min_distance < 500:
+            if not association_made and closest_zone and min_distance < 1000:  # Increased from 500
                 confidence = code.get("confidence", 0.8)
-                self.memory_manager.associate_furniture_code(closest_zone, 1, code_text, confidence)
+                page_num = code.get("page", 1)
+                self.memory_manager.associate_furniture_code(closest_zone, page_num, code_text, confidence)
                 associations_made += 1
                 association_made = True
                 st.success(
@@ -1400,6 +1419,45 @@ class EnhancedZoneExtractor:
                 except Exception as e:
                     st.warning(f"Enhanced OCR failed for page {page_num + 1}: {str(e)}")
                     continue
+
+            # CRITICAL: Store OCR position data for association
+            if ocr_data:
+                # Ensure we have position data before association
+                st.info("🔗 Preparing OCR position data for association...")
+                
+                # Debug: Show what we have
+                st.write(f"📊 OCR words available: {len(ocr_data)}")
+                st.write(f"📊 Zones detected: {len(results['zones'])}")
+                st.write(f"📊 Codes detected: {len(results['codes'])}")
+                
+                # Add position data to zones and codes
+                for zone in results['zones']:
+                    zone_text = zone.get('zone_area', zone.get('text', ''))
+                    # Find position for zone words
+                    for word_data in ocr_data:
+                        word_text = word_data.get('text', '').strip().upper()
+                        if any(zone_part.upper() in word_text for zone_part in zone_text.split() if len(zone_part) > 2):
+                            zone['bbox'] = {
+                                'x': word_data.get('x', 0),
+                                'y': word_data.get('y', 0),
+                                'w': word_data.get('w', 0),
+                                'h': word_data.get('h', 0)
+                            }
+                            break
+                
+                for code in results['codes']:
+                    code_text = code.get('code', code.get('text', '')).upper()
+                    # Find position for code
+                    for word_data in ocr_data:
+                        word_text = word_data.get('text', '').strip().upper()
+                        if code_text in word_text or word_text in code_text:
+                            code['bbox'] = {
+                                'x': word_data.get('x', 0),
+                                'y': word_data.get('y', 0),
+                                'w': word_data.get('w', 0),
+                                'h': word_data.get('h', 0)
+                            }
+                            break
 
             # CRITICAL: Associate codes to zones (was missing!)
             self.associate_detected_codes_to_zones(results)
