@@ -12,8 +12,12 @@ import pdfplumber
 import pytesseract
 import streamlit as st
 from pdf2image import convert_from_path
-from PIL import Image
+from PIL import Image, ImageFile
 from sklearn.cluster import DBSCAN
+
+# Increase PIL image size limit to handle large architectural PDFs
+Image.MAX_IMAGE_PIXELS = None  # Remove limit entirely (with caution)
+ImageFile.LOAD_TRUNCATED_IMAGES = True  # Handle truncated images gracefully
 
 st.set_page_config(page_title="A1 PDF Zones/Codes Extractor - Enhanced", layout="wide")
 
@@ -22,9 +26,12 @@ class A1PDFProcessor:
     """A1-specific PDF processing with enhanced image quality"""
 
     def __init__(self):
-        self.target_dpi = 600  # Minimum 600 DPI as required
+        self.target_dpi = 300  # Start with 300 DPI for safety
+        self.max_dpi = 600  # Maximum DPI allowed
+        self.min_dpi = 150  # Minimum acceptable DPI
         self.a1_dimensions_mm = (594, 841)  # A1 size in mm
         self.a1_dimensions_px = None  # Will be calculated based on DPI
+        self.max_pixels = 50_000_000  # 50 megapixels safety limit
 
     def detect_a1_format(self, pdf_path):
         """Detect if PDF is A1 format and get orientation"""
@@ -53,6 +60,34 @@ class A1PDFProcessor:
         except Exception as e:
             st.warning(f"Could not detect A1 format: {str(e)}")
             return False, "unknown", (0, 0)
+
+    def calculate_safe_dpi(self, page_width_mm, page_height_mm):
+        """Calculate safe DPI based on page dimensions to avoid PIL limits"""
+        try:
+            # Calculate page dimensions in inches
+            width_inches = page_width_mm / 25.4
+            height_inches = page_height_mm / 25.4
+            
+            # Calculate maximum safe DPI based on our pixel limit
+            # max_pixels = width_px * height_px = (width_in * dpi) * (height_in * dpi)
+            # Therefore: dpi = sqrt(max_pixels / (width_in * height_in))
+            area_square_inches = width_inches * height_inches
+            max_safe_dpi = int((self.max_pixels / area_square_inches) ** 0.5)
+            
+            # Apply constraints
+            safe_dpi = max(self.min_dpi, min(max_safe_dpi, self.max_dpi))
+            
+            # Calculate actual pixel count at this DPI
+            actual_pixels = (width_inches * safe_dpi) * (height_inches * safe_dpi)
+            
+            if safe_dpi < self.max_dpi:
+                st.info(f"🔧 Adjusted DPI to {safe_dpi} for safety ({int(actual_pixels/1000000)}MP instead of {int((width_inches*600)*(height_inches*600)/1000000)}MP at 600 DPI)")
+            
+            return safe_dpi
+                
+        except Exception as e:
+            st.warning(f"DPI calculation failed: {str(e)}, using default")
+            return self.min_dpi
 
     def enhance_image_quality(self, image):
         """Enhanced image processing for architectural drawings"""
@@ -483,9 +518,14 @@ class EnhancedZoneExtractor:
         try:
             # Detect A1 format
             is_a1, orientation, dimensions = self.pdf_processor.detect_a1_format(pdf_path)
+            
+            # Calculate safe DPI based on page dimensions
+            safe_dpi = self.pdf_processor.calculate_safe_dpi(dimensions[0], dimensions[1])
+            
             st.info(
                 f"PDF Format: {'A1' if is_a1 else 'Other'} ({orientation}), Dimensions: {dimensions[0]:.1f}x{dimensions[1]:.1f}mm"
             )
+            st.info(f"🎯 Processing at {safe_dpi} DPI for optimal quality and safety")
 
             # Get number of pages
             with pdfplumber.open(pdf_path) as pdf:
@@ -495,13 +535,25 @@ class EnhancedZoneExtractor:
             for page_num in range(min(num_pages, 5)):  # Limit for performance
                 st.progress((page_num + 1) / min(num_pages, 5), f"Processing page {page_num + 1}")
 
-                # Convert to high-resolution image (600+ DPI)
-                images = convert_from_path(
-                    pdf_path,
-                    first_page=page_num + 1,
-                    last_page=page_num + 1,
-                    dpi=self.pdf_processor.target_dpi,
-                )
+                # Convert to safe resolution image
+                try:
+                    images = convert_from_path(
+                        pdf_path,
+                        first_page=page_num + 1,
+                        last_page=page_num + 1,
+                        dpi=safe_dpi,
+                    )
+                except Exception as conversion_error:
+                    st.warning(f"⚠️ Image conversion failed at {safe_dpi} DPI: {str(conversion_error)}")
+                    # Try with reduced DPI as fallback
+                    fallback_dpi = max(150, safe_dpi // 2)
+                    st.info(f"🔄 Retrying with fallback DPI: {fallback_dpi}")
+                    images = convert_from_path(
+                        pdf_path,
+                        first_page=page_num + 1,
+                        last_page=page_num + 1,
+                        dpi=fallback_dpi,
+                    )
 
                 if not images:
                     continue
@@ -594,7 +646,14 @@ class EnhancedZoneExtractor:
             return results
 
         except Exception as e:
-            st.error(f"Enhanced processing failed: {str(e)}")
+            error_msg = str(e)
+            if "exceeds limit" in error_msg and "pixels" in error_msg:
+                st.error(f"⚠️ Image too large for processing: {error_msg}")
+                st.info("💡 This PDF requires lower DPI processing. The image size safety feature prevented a potential memory issue.")
+                st.info("🔄 Try using a smaller PDF or contact support for large file processing options.")
+            else:
+                st.error(f"Enhanced processing failed: {error_msg}")
+            
             return results
 
 

@@ -11,6 +11,14 @@ import streamlit as st
 # Add the workspace to Python path to import enhanced functionality
 sys.path.insert(0, '/workspace')
 
+# Apply PIL image size fix before importing enhanced functionality
+try:
+    from PIL import Image, ImageFile
+    Image.MAX_IMAGE_PIXELS = None  # Remove PIL image size limit
+    ImageFile.LOAD_TRUNCATED_IMAGES = True  # Handle truncated images
+except ImportError:
+    pass  # PIL might not be available
+
 try:
     from enhanced_app import EnhancedZoneExtractor
     ENHANCED_AVAILABLE = True
