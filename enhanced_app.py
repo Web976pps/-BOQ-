@@ -17,9 +17,13 @@ from shapely.geometry import Point, box
 from shapely.ops import unary_union
 from sklearn.cluster import DBSCAN
 
-# Increase PIL image size limit to handle large architectural PDFs
-Image.MAX_IMAGE_PIXELS = None  # Remove limit entirely (with caution)
+# CRITICAL FIX: Set PIL limits for large A1 images
+Image.MAX_IMAGE_PIXELS = None  # Remove decompression bomb limit
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True  # Handle truncated images gracefully
+import warnings
+
+warnings.filterwarnings("ignore", "Palette images with Transparency")
 
 
 # Enhanced spatial analysis utilities
@@ -59,7 +63,8 @@ class A1PDFProcessor:
         self.min_dpi = 150  # Minimum acceptable DPI
         self.a1_dimensions_mm = (594, 841)  # A1 size in mm
         self.a1_dimensions_px = None  # Will be calculated based on DPI
-        self.max_pixels = 50_000_000  # 50 megapixels safety limit
+        # ENHANCED: More conservative pixel limit to prevent memory issues
+        self.max_pixels = 150_000_000  # 150 megapixels safety limit (increased from 50M for A1)
 
         # Enhanced performance optimization
         self.optimization_enabled = True
@@ -107,15 +112,23 @@ class A1PDFProcessor:
             area_square_inches = width_inches * height_inches
             max_safe_dpi = int((self.max_pixels / area_square_inches) ** 0.5)
 
-            # Apply constraints
-            safe_dpi = max(self.min_dpi, min(max_safe_dpi, self.max_dpi))
+            # ENHANCED: Apply more conservative constraints for large images
+            # Apply 20% safety margin for memory allocation overhead
+            conservative_dpi = int(max_safe_dpi * 0.8)
+            safe_dpi = max(self.min_dpi, min(conservative_dpi, self.max_dpi))
 
             # Calculate actual pixel count at this DPI
             actual_pixels = (width_inches * safe_dpi) * (height_inches * safe_dpi)
 
+            # Additional safety check - if still too large, reduce further
+            if actual_pixels > self.max_pixels:
+                # More aggressive reduction
+                safe_dpi = int(safe_dpi * 0.7)
+                actual_pixels = (width_inches * safe_dpi) * (height_inches * safe_dpi)
+
             if safe_dpi < self.max_dpi:
                 st.info(
-                    f"🔧 Adjusted DPI to {safe_dpi} for safety ({int(actual_pixels/1000000)}MP instead of {int((width_inches*600)*(height_inches*600)/1000000)}MP at 600 DPI)"
+                    f"🔧 Adjusted DPI to {safe_dpi} for safety ({int(actual_pixels/1000000)}MP, {int(actual_pixels):,} pixels)"
                 )
 
             return safe_dpi
@@ -882,8 +895,22 @@ class EnhancedZoneExtractor:
                     break
 
             if not code_position:
-                st.warning(f"⚠️ Code '{original_text}' position not found in OCR data")
-                continue
+                # ENHANCED: Try to find position by partial text matching
+                partial_matches = [
+                    text
+                    for text in word_positions
+                    if original_text.upper() in text or text in original_text.upper()
+                ]
+                if partial_matches:
+                    code_position = word_positions[partial_matches[0]]
+                    st.info(
+                        f"📍 Found code '{original_text}' via partial match: '{partial_matches[0]}'"
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Code '{original_text}' position not found in OCR data (skipping association)"
+                    )
+                    continue
 
             code_x = code_position["x"] + (code_position["w"] / 2)
             code_y = code_position["y"] + (code_position["h"] / 2)
@@ -1209,29 +1236,41 @@ class EnhancedZoneExtractor:
             for page_num in range(min(num_pages, 5)):  # Limit for performance
                 st.progress((page_num + 1) / min(num_pages, 5), f"Processing page {page_num + 1}")
 
-                # Convert to safe resolution image
-                try:
-                    images = convert_from_path(
-                        pdf_path,
-                        first_page=page_num + 1,
-                        last_page=page_num + 1,
-                        dpi=safe_dpi,
-                    )
-                except Exception as conversion_error:
-                    st.warning(
-                        f"⚠️ Image conversion failed at {safe_dpi} DPI: {str(conversion_error)}"
-                    )
-                    # Try with reduced DPI as fallback
-                    fallback_dpi = max(150, safe_dpi // 2)
-                    st.info(f"🔄 Retrying with fallback DPI: {fallback_dpi}")
-                    images = convert_from_path(
-                        pdf_path,
-                        first_page=page_num + 1,
-                        last_page=page_num + 1,
-                        dpi=fallback_dpi,
-                    )
+                # Convert to safe resolution image with enhanced error handling
+                images = None
+                dpi_attempts = [safe_dpi]
+
+                # Add fallback DPI values
+                if safe_dpi > 200:
+                    dpi_attempts.append(200)
+                if safe_dpi > 150:
+                    dpi_attempts.append(150)
+
+                for attempt_dpi in dpi_attempts:
+                    try:
+                        st.info(f"🔄 Attempting conversion at {attempt_dpi} DPI...")
+                        images = convert_from_path(
+                            pdf_path,
+                            first_page=page_num + 1,
+                            last_page=page_num + 1,
+                            dpi=attempt_dpi,
+                        )
+                        if images:
+                            if attempt_dpi != safe_dpi:
+                                st.success(
+                                    f"✅ Conversion successful at fallback {attempt_dpi} DPI"
+                                )
+                            break
+                    except Exception as conversion_error:
+                        error_msg = str(conversion_error)
+                        if "exceeds limit" in error_msg or "pixels" in error_msg:
+                            st.warning(f"⚠️ DPI {attempt_dpi} still too large: {error_msg}")
+                        else:
+                            st.warning(f"⚠️ Conversion failed at {attempt_dpi} DPI: {error_msg}")
+                        continue
 
                 if not images:
+                    st.error(f"❌ All conversion attempts failed for page {page_num + 1}")
                     continue
 
                 image = images[0]
