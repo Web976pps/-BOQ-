@@ -67,24 +67,26 @@ class A1PDFProcessor:
             # Calculate page dimensions in inches
             width_inches = page_width_mm / 25.4
             height_inches = page_height_mm / 25.4
-            
+
             # Calculate maximum safe DPI based on our pixel limit
             # max_pixels = width_px * height_px = (width_in * dpi) * (height_in * dpi)
             # Therefore: dpi = sqrt(max_pixels / (width_in * height_in))
             area_square_inches = width_inches * height_inches
             max_safe_dpi = int((self.max_pixels / area_square_inches) ** 0.5)
-            
+
             # Apply constraints
             safe_dpi = max(self.min_dpi, min(max_safe_dpi, self.max_dpi))
-            
+
             # Calculate actual pixel count at this DPI
             actual_pixels = (width_inches * safe_dpi) * (height_inches * safe_dpi)
-            
+
             if safe_dpi < self.max_dpi:
-                st.info(f"🔧 Adjusted DPI to {safe_dpi} for safety ({int(actual_pixels/1000000)}MP instead of {int((width_inches*600)*(height_inches*600)/1000000)}MP at 600 DPI)")
-            
+                st.info(
+                    f"🔧 Adjusted DPI to {safe_dpi} for safety ({int(actual_pixels/1000000)}MP instead of {int((width_inches*600)*(height_inches*600)/1000000)}MP at 600 DPI)"
+                )
+
             return safe_dpi
-                
+
         except Exception as e:
             st.warning(f"DPI calculation failed: {str(e)}, using default")
             return self.min_dpi
@@ -518,10 +520,10 @@ class EnhancedZoneExtractor:
         try:
             # Detect A1 format
             is_a1, orientation, dimensions = self.pdf_processor.detect_a1_format(pdf_path)
-            
+
             # Calculate safe DPI based on page dimensions
             safe_dpi = self.pdf_processor.calculate_safe_dpi(dimensions[0], dimensions[1])
-            
+
             st.info(
                 f"PDF Format: {'A1' if is_a1 else 'Other'} ({orientation}), Dimensions: {dimensions[0]:.1f}x{dimensions[1]:.1f}mm"
             )
@@ -544,7 +546,9 @@ class EnhancedZoneExtractor:
                         dpi=safe_dpi,
                     )
                 except Exception as conversion_error:
-                    st.warning(f"⚠️ Image conversion failed at {safe_dpi} DPI: {str(conversion_error)}")
+                    st.warning(
+                        f"⚠️ Image conversion failed at {safe_dpi} DPI: {str(conversion_error)}"
+                    )
                     # Try with reduced DPI as fallback
                     fallback_dpi = max(150, safe_dpi // 2)
                     st.info(f"🔄 Retrying with fallback DPI: {fallback_dpi}")
@@ -649,11 +653,15 @@ class EnhancedZoneExtractor:
             error_msg = str(e)
             if "exceeds limit" in error_msg and "pixels" in error_msg:
                 st.error(f"⚠️ Image too large for processing: {error_msg}")
-                st.info("💡 This PDF requires lower DPI processing. The image size safety feature prevented a potential memory issue.")
-                st.info("🔄 Try using a smaller PDF or contact support for large file processing options.")
+                st.info(
+                    "💡 This PDF requires lower DPI processing. The image size safety feature prevented a potential memory issue."
+                )
+                st.info(
+                    "🔄 Try using a smaller PDF or contact support for large file processing options."
+                )
             else:
                 st.error(f"Enhanced processing failed: {error_msg}")
-            
+
             return results
 
 
