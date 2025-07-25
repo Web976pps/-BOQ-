@@ -1,0 +1,64 @@
+{
+  "timestamp": 1753405357,
+  "base_url": "http://localhost:8501",
+  "total_tests": 8,
+  "passed_tests": 7,
+  "test_results": [
+    {
+      "test": "Connectivity",
+      "status": "PASS",
+      "details": "HTTP 200",
+      "error": null,
+      "timestamp": 1753405352.3981433
+    },
+    {
+      "test": "Health Endpoint",
+      "status": "PASS",
+      "details": "Health check OK",
+      "error": null,
+      "timestamp": 1753405352.90064
+    },
+    {
+      "test": "App Loading",
+      "status": "FAIL",
+      "details": "Only found 1 indicators",
+      "error": null,
+      "timestamp": 1753405353.4027953
+    },
+    {
+      "test": "Enhanced App Components",
+      "status": "PASS",
+      "details": "Zones: 2, Codes: 2, Components initialized",
+      "error": null,
+      "timestamp": 1753405354.7405891
+    },
+    {
+      "test": "File Upload Readiness",
+      "status": "PASS",
+      "details": "Test files available: architectural_test.pdf (3072 bytes), test_zones.pdf (2321 bytes), input/sample.pdf (3072 bytes)",
+      "error": null,
+      "timestamp": 1753405355.240755
+    },
+    {
+      "test": "Streamlit Process",
+      "status": "PASS",
+      "details": "Found 2 Streamlit process(es)",
+      "error": null,
+      "timestamp": 1753405355.748091
+    },
+    {
+      "test": "Response Time",
+      "status": "PASS",
+      "details": "Response time: 0.00s",
+      "error": null,
+      "timestamp": 1753405356.2510948
+    },
+    {
+      "test": "Static Assets",
+      "status": "PASS",
+      "details": "3/3 static assets accessible",
+      "error": null,
+      "timestamp": 1753405356.7580364
+    }
+  ]
+}
