@@ -16,6 +16,11 @@ from PIL import Image, ImageFile
 from shapely.geometry import Point, box
 from shapely.ops import unary_union
 from sklearn.cluster import DBSCAN
+import logging
+
+# Set up comprehensive logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # CRITICAL FIX: Set PIL limits for large A1 images
 Image.MAX_IMAGE_PIXELS = None  # Remove decompression bomb limit
@@ -979,6 +984,30 @@ class EnhancedZoneExtractor:
         
         return associations_made
 
+    def _calculate_dynamic_distance_threshold(self, image_size):
+        """Calculate dynamic distance threshold based on page size/DPI"""
+        page_width, page_height = image_size
+        # Dynamic threshold: 10% of page width, min 200px, max 2000px
+        dynamic_threshold = max(200, min(2000, page_width * 0.1))
+        logger.debug(f"Agent 2: Dynamic distance threshold calculated: {dynamic_threshold}px for page size {image_size}")
+        return dynamic_threshold
+
+    def _deduplicate_codes(self, codes):
+        """Agent 2: Remove duplicate codes using sets"""
+        seen_codes = set()
+        unique_codes = []
+        
+        for code in codes:
+            code_text = code.get("code", "")
+            if code_text not in seen_codes:
+                seen_codes.add(code_text)
+                unique_codes.append(code)
+            else:
+                logger.debug(f"Agent 2: Removed duplicate code: {code_text}")
+        
+        logger.debug(f"Agent 2: Deduplicated {len(codes)} → {len(unique_codes)} codes")
+        return unique_codes
+
     def associate_detected_codes_to_zones(self, results):
         """Associate detected furniture codes with their corresponding zones using OCR positions"""
         st.info("🔗 Associating furniture codes to zones...")
@@ -994,6 +1023,20 @@ class EnhancedZoneExtractor:
         if not ocr_data:
             st.warning("⚠️ No OCR position data available for association")
             return
+
+        # Agent 2: Deduplicate codes
+        codes = self._deduplicate_codes(codes)
+        logger.debug(f"Agent 2: Processing {len(codes)} unique codes with {len(zones)} zones")
+
+        # Agent 2: Calculate dynamic distance threshold
+        # Estimate image size from OCR data bounds
+        if ocr_data:
+            max_x = max(word.get("x", 0) + word.get("w", 0) for word in ocr_data)
+            max_y = max(word.get("y", 0) + word.get("h", 0) for word in ocr_data)
+            estimated_size = (max_x, max_y)
+            distance_threshold = self._calculate_dynamic_distance_threshold(estimated_size)
+        else:
+            distance_threshold = 1000  # Fallback
 
         associations_made = 0
 
@@ -1117,13 +1160,14 @@ class EnhancedZoneExtractor:
             except Exception:
                 pass  # Fall back to distance method
 
-            # Fall back to distance-based association if geometric containment failed
-            if not association_made and closest_zone and min_distance < 1000:  # Increased from 500
+            # Agent 2: Dynamic distance-based association
+            if not association_made and closest_zone and min_distance < distance_threshold:
                 confidence = code.get("confidence", 0.8)
                 page_num = code.get("page", 1)
                 self.memory_manager.associate_furniture_code(closest_zone, page_num, code_text, confidence)
                 associations_made += 1
                 association_made = True
+                logger.debug(f"Agent 2: Associated '{code_text}' → '{closest_zone}' (distance: {min_distance:.1f}px, threshold: {distance_threshold}px)")
                 st.success(
                     f"✅ Associated '{original_text}' → '{code_text}' with zone '{closest_zone}' (distance: {min_distance:.1f}px)"
                 )
@@ -1151,6 +1195,7 @@ class EnhancedZoneExtractor:
         try:
             # Get zones and codes from memory manager (where associations are stored)
             zone_data = self.memory_manager.get_zone_associations()
+            logger.debug(f"Agent 1 Data Flow: Retrieved {len(zone_data)} zones from memory manager")
 
             csv_rows = []
 
@@ -1164,10 +1209,12 @@ class EnhancedZoneExtractor:
             }
 
             st.info(f"📊 Processing {len(zone_data)} zones for CSV generation...")
+            logger.debug(f"Agent 1 Data Flow: Starting CSV processing with {len(zone_data)} zones")
 
             # Process each zone
             for zone_name, zone_info in zone_data.items():
                 codes_in_zone = zone_info.get("codes", [])
+                logger.debug(f"Agent 3: Processing zone '{zone_name}' with {len(codes_in_zone)} codes")
 
                 if not codes_in_zone:
                     # Zone with no codes - still include in CSV
@@ -1180,6 +1227,7 @@ class EnhancedZoneExtractor:
                             "Notes": "No furniture codes detected in this zone",
                         }
                     )
+                    logger.debug(f"Agent 3: Added empty zone row for '{zone_name}'")
                     continue
 
                 # Count codes by type in this zone
@@ -1268,20 +1316,28 @@ class EnhancedZoneExtractor:
                 }
             )
 
-            # Convert to DataFrame and CSV
-            if csv_rows:
-                df = pd.DataFrame(csv_rows)
-                csv_string = df.to_csv(index=False, encoding="utf-8")
-
-                st.success(f"✅ CSV generated: {len(csv_rows)} rows, {total_codes} total codes")
-                st.info(
-                    f"📋 Grand totals: CH={grand_totals['CH']}, TB={grand_totals['TB']}, C={grand_totals['C']}, SU={grand_totals['SU']}, KT={grand_totals['KT']}"
-                )
-
-                return csv_string
-            else:
+            # Agent 3: Validate inputs before CSV generation
+            if not csv_rows:
+                logger.warning("Agent 3: No CSV rows generated")
                 st.warning("⚠️ No data available for CSV generation")
-                return None
+                return "Zone_Area,Furniture_Code,Code_Type,Subtotal_Count,Notes\n"  # Return headers only
+            
+            logger.debug(f"Agent 3: Generated {len(csv_rows)} CSV rows")
+
+            # Convert to DataFrame and CSV
+            df = pd.DataFrame(csv_rows)
+            csv_string = df.to_csv(index=False, encoding="utf-8")
+
+            # Agent 3: Validate CSV output
+            csv_lines = csv_string.strip().split('\n')
+            logger.debug(f"Agent 3: CSV output has {len(csv_lines)} lines, first line: {csv_lines[0] if csv_lines else 'EMPTY'}")
+
+            st.success(f"✅ CSV generated: {len(csv_rows)} rows, {total_codes} total codes")
+            st.info(
+                f"📋 Grand totals: CH={grand_totals['CH']}, TB={grand_totals['TB']}, C={grand_totals['C']}, SU={grand_totals['SU']}, KT={grand_totals['KT']}"
+            )
+
+            return csv_string
 
         except Exception as e:
             st.error(f"❌ CSV generation failed: {str(e)}")
