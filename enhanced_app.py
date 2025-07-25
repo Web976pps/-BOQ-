@@ -72,32 +72,64 @@ class A1PDFProcessor:
         self.memory_efficient_processing = True
 
     def detect_a1_format(self, pdf_path):
-        """Detect if PDF is A1 format and get orientation"""
+        """Enhanced A1 format detection for architectural drawings"""
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 page = pdf.pages[0]  # Check first page
                 width_mm = page.width * 25.4 / 72  # Convert points to mm
                 height_mm = page.height * 25.4 / 72
 
-                # Check if dimensions match A1 (with tolerance)
-                tolerance = 50  # 50mm tolerance
+                # ENHANCED: Multiple criteria for large format detection
+
+                # Standard A1 dimensions
+                a1_width, a1_height = 594, 841
+
+                # Check exact A1 match first (with tight tolerance)
+                tolerance = 10  # 10mm tolerance for precise format detection
                 is_a1_portrait = (
-                    abs(width_mm - 594) < tolerance and abs(height_mm - 841) < tolerance
+                    abs(width_mm - a1_width) < tolerance and abs(height_mm - a1_height) < tolerance
                 )
                 is_a1_landscape = (
-                    abs(width_mm - 841) < tolerance and abs(height_mm - 594) < tolerance
+                    abs(width_mm - a1_height) < tolerance and abs(height_mm - a1_width) < tolerance
                 )
 
                 if is_a1_portrait:
                     return True, "portrait", (width_mm, height_mm)
                 elif is_a1_landscape:
                     return True, "landscape", (width_mm, height_mm)
+
+                # ENHANCED: Detect large format architectural drawings
+                # Many architectural drawings are A1-equivalent but not exact A1
+                min_dimension = min(width_mm, height_mm)
+                max_dimension = max(width_mm, height_mm)
+
+                # Large format criteria (architectural drawing size)
+                is_large_format = (
+                    min_dimension >= 400
+                    and max_dimension >= 600  # Minimum large format
+                    and min_dimension <= 1200
+                    and max_dimension <= 1200  # Maximum reasonable
+                )
+
+                # Aspect ratio check for architectural drawings
+                aspect_ratio = max_dimension / min_dimension
+                is_reasonable_aspect = 1.2 <= aspect_ratio <= 2.0  # Common architectural ratios
+
+                if is_large_format and is_reasonable_aspect:
+                    orientation = "landscape" if width_mm > height_mm else "portrait"
+                    st.info(
+                        f"📐 Detected large format architectural drawing: {width_mm:.1f}x{height_mm:.1f}mm"
+                    )
+                    return True, orientation, (width_mm, height_mm)
                 else:
-                    return False, "unknown", (width_mm, height_mm)
+                    st.warning(
+                        f"📄 Small format document detected: {width_mm:.1f}x{height_mm:.1f}mm (may not be optimal for architectural processing)"
+                    )
+                    return False, "small_format", (width_mm, height_mm)
 
         except Exception as e:
-            st.warning(f"Could not detect A1 format: {str(e)}")
-            return False, "unknown", (0, 0)
+            st.error(f"Could not detect PDF format: {str(e)}")
+            return False, "error", (0, 0)
 
     def calculate_safe_dpi(self, page_width_mm, page_height_mm):
         """Calculate safe DPI based on page dimensions to avoid PIL limits"""
@@ -1223,9 +1255,16 @@ class EnhancedZoneExtractor:
             # Calculate safe DPI based on page dimensions
             safe_dpi = self.pdf_processor.calculate_safe_dpi(dimensions[0], dimensions[1])
 
-            st.info(
-                f"PDF Format: {'A1' if is_a1 else 'Other'} ({orientation}), Dimensions: {dimensions[0]:.1f}x{dimensions[1]:.1f}mm"
-            )
+            # Enhanced format display
+            if is_a1:
+                if orientation in ["portrait", "landscape"]:
+                    format_type = f"A1-Compatible Large Format ({orientation})"
+                else:
+                    format_type = "Large Format Architectural Drawing"
+            else:
+                format_type = f"Non-A1 Format ({orientation})"
+            
+            st.info(f"📐 PDF Format: {format_type}, Dimensions: {dimensions[0]:.1f}x{dimensions[1]:.1f}mm")
             st.info(f"🎯 Processing at {safe_dpi} DPI for optimal quality and safety")
 
             # Get number of pages
