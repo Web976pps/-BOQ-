@@ -507,6 +507,115 @@ class EnhancedZoneExtractor:
 
         return min(confidence, 1.0)
 
+    def associate_detected_codes_to_zones(self, results):
+        """Associate detected furniture codes with their corresponding zones"""
+        st.info("🔗 Associating furniture codes to zones...")
+        
+        zones = results.get("zones", [])
+        codes = results.get("codes", [])
+        
+        if not zones or not codes:
+            st.warning("⚠️ No zones or codes to associate")
+            return
+        
+        associations_made = 0
+        
+        for code in codes:
+            code_text = code.get("text", "")
+            code_bbox = code.get("bbox", {})
+            code_x = code_bbox.get("x1", 0) + (code_bbox.get("w", 0) / 2)
+            code_y = code_bbox.get("y1", 0) + (code_bbox.get("h", 0) / 2)
+            
+            closest_zone = None
+            min_distance = float('inf')
+            
+            # Find closest zone to this code
+            for zone in zones:
+                zone_text = zone.get("text", "")
+                zone_bbox = zone.get("bbox", {})
+                zone_x = zone_bbox.get("x1", 0) + (zone_bbox.get("w", 0) / 2)
+                zone_y = zone_bbox.get("y1", 0) + (zone_bbox.get("h", 0) / 2)
+                
+                # Calculate distance
+                distance = ((code_x - zone_x) ** 2 + (code_y - zone_y) ** 2) ** 0.5
+                
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_zone = zone_text
+            
+            # Associate if reasonable distance (within 500 pixels)
+            if closest_zone and min_distance < 500:
+                confidence = code.get("confidence", 0.8)
+                self.memory_manager.associate_furniture_code(
+                    closest_zone, 1, code_text, confidence
+                )
+                associations_made += 1
+                st.success(f"✅ Associated '{code_text}' with zone '{closest_zone}' (distance: {min_distance:.1f}px)")
+            else:
+                st.warning(f"⚠️ Code '{code_text}' too far from any zone (min distance: {min_distance:.1f}px)")
+        
+        st.info(f"🔗 Association complete: {associations_made} codes associated to zones")
+
+    def merge_fragmented_text(self, word_positions):
+        """Merge fragmented text that should be single zones"""
+        if not word_positions:
+            return word_positions
+        
+        merged_positions = []
+        used_indices = set()
+        
+        for i, word in enumerate(word_positions):
+            if i in used_indices:
+                continue
+                
+            # Check if this word should be merged with nearby words
+            if word["text"].isupper() and len(word["text"]) > 2:
+                merged_text = word["text"]
+                merged_bbox = {
+                    "x1": word["x"],
+                    "y1": word["y"], 
+                    "w": word["w"],
+                    "h": word["h"]
+                }
+                merged_confidence = word["confidence"]
+                group_indices = [i]
+                
+                # Look for nearby words to merge
+                for j, other_word in enumerate(word_positions):
+                    if j != i and j not in used_indices and other_word["text"].isupper():
+                        # Check if words are close enough (within 50 pixels vertically or horizontally)
+                        x_distance = abs(word["x"] - other_word["x"])
+                        y_distance = abs(word["y"] - other_word["y"])
+                        
+                        if (x_distance < 200 and y_distance < 50) or (y_distance < 200 and x_distance < 50):
+                            merged_text += " " + other_word["text"]
+                            merged_bbox["x1"] = min(merged_bbox["x1"], other_word["x"])
+                            merged_bbox["y1"] = min(merged_bbox["y1"], other_word["y"])
+                            merged_bbox["w"] = max(merged_bbox["x1"] + merged_bbox["w"], other_word["x"] + other_word["w"]) - merged_bbox["x1"]
+                            merged_bbox["h"] = max(merged_bbox["y1"] + merged_bbox["h"], other_word["y"] + other_word["h"]) - merged_bbox["y1"]
+                            merged_confidence = max(merged_confidence, other_word["confidence"])
+                            group_indices.append(j)
+                
+                # Mark all used indices
+                for idx in group_indices:
+                    used_indices.add(idx)
+                
+                # Add merged word
+                merged_positions.append({
+                    "text": merged_text.strip(),
+                    "x": merged_bbox["x1"],
+                    "y": merged_bbox["y1"],
+                    "w": merged_bbox["w"],
+                    "h": merged_bbox["h"],
+                    "confidence": merged_confidence
+                })
+            else:
+                # Keep individual word
+                used_indices.add(i)
+                merged_positions.append(word)
+        
+        return merged_positions
+
     def process_pdf_enhanced(self, pdf_path):
         """Enhanced PDF processing with full architectural analysis"""
         results = {
@@ -593,6 +702,9 @@ class EnhancedZoneExtractor:
                                     "confidence": int(data["conf"][i]) / 100.0,
                                 }
                             )
+                    
+                    # Fix text fragmentation by merging nearby words
+                    word_positions = self.merge_fragmented_text(word_positions)
 
                     # Detect zones and codes with confidence
                     zone_candidates = self.detect_all_caps_zones(text)
@@ -643,6 +755,9 @@ class EnhancedZoneExtractor:
                     st.warning(f"Enhanced OCR failed for page {page_num + 1}: {str(e)}")
                     continue
 
+            # CRITICAL: Associate codes to zones (was missing!)
+            self.associate_detected_codes_to_zones(results)
+            
             # Final validation and summary
             results["processing_summary"] = self.memory_manager.get_processing_summary()
             results["validation"] = self.memory_manager.validate_completeness()
