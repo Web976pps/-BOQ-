@@ -1,4 +1,4 @@
-APP=-BOQ-
+APP=boq-extractor
 IMAGE=$(APP):latest
 RUN_DIR=outputs/run_$(shell date +%Y%m%d_%H%M%S)
 
@@ -42,13 +42,13 @@ test:
 
 # Docker build
 docker-build:
-	docker build -t $(IMAGE) -f docker/Dockerfile .
-	docker build -t pdf-extractor .
+	sudo docker build -t $(IMAGE) -f docker/Dockerfile .
+	sudo docker build -t pdf-extractor .
 
 # Docker run (original)
 docker-run:
 	mkdir -p $(RUN_DIR)
-	docker run --rm -v $(PWD):/work -w /work $(IMAGE) \
+	sudo docker run --rm -v $(PWD):/work -w /work $(IMAGE) \
 	  python -m src.extract_zones_codes \
 	    --pdf /work/input/sample.pdf \
 	    --out /work/$(RUN_DIR) \
@@ -56,7 +56,7 @@ docker-run:
 
 # Docker run (enhanced)
 docker-run-enhanced:
-	docker run -p 8501:8501 pdf-extractor
+	sudo docker run -p 8501:8501 pdf-extractor
 
 # Cleanup
 clean:
