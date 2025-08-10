@@ -7,6 +7,8 @@ def test_regex_matches_valid_codes():
         "TB-12",
         "C 9",
         "su 7b",
+        "SK3B",
+        "FL-45",
     ]
     for s in samples:
         assert _CODE_PATTERN.search(s)

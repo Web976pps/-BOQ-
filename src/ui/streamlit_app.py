@@ -116,7 +116,7 @@ if run_btn and uploaded:
                     prefix_counts = {}
                     for code in codes:
                         code_text = code.get("text", "")
-                        for prefix in ["CH", "TB", "C", "SU", "KT"]:
+                        for prefix in ["CH", "TB", "C", "SU", "KT", "SK", "FL"]:
                             if code_text.startswith(prefix):
                                 prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
                                 break
@@ -131,7 +131,7 @@ if run_btn and uploaded:
                 global_prefix_counts = {}
                 for code in codes:
                     code_text = code.get("text", "")
-                    for prefix in ["CH", "TB", "C", "SU", "KT"]:
+                    for prefix in ["CH", "TB", "C", "SU", "KT", "SK", "FL"]:
                         if code_text.startswith(prefix):
                             global_prefix_counts[prefix] = global_prefix_counts.get(prefix, 0) + 1
                             break
