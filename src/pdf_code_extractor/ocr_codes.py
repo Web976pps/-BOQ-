@@ -22,4 +22,6 @@ def detect(img, page_num):
     return codes
 
 def normalise_code(code):
-    return code.upper()
+    normalized = code.upper()
+    changes = [] if normalized == code else ['uppercased']
+    return normalized, changes
