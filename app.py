@@ -149,9 +149,9 @@ class ZoneExtractor:
         try:
             with open(pdf_path, "rb") as file:
                 reader = PyPDF2.PdfReader(file)
-                for page_num in range(len(reader.pages)):
-                    page = reader.pages[page_num]
-                    text = page.extract_text()
+        for page_num in range(len(reader.pages)):
+                page = reader.pages[page_num]
+                text = page.extract_text()
                     if text:
                         zones = self.detect_all_caps_zones(text)
                         codes = self.detect_furniture_codes(text)
@@ -178,7 +178,7 @@ class ZoneExtractor:
                                     "y": None,
                                 }
                             )
-        except Exception as e:
+            except Exception as e:
             st.warning(f"PyPDF2 extraction failed: {str(e)}")
 
         return all_zones, all_codes
@@ -283,7 +283,7 @@ class ZoneExtractor:
                         }
                     )
 
-        except Exception as e:
+    except Exception as e:
             st.warning(f"OCR processing failed, falling back to text extraction: {str(e)}")
 
         # Supplement with traditional text extraction
@@ -464,13 +464,13 @@ def display_results(zones, codes, associations):
         csv = comprehensive_df.to_csv(index=False)
 
         st.subheader("📥 Download Results")
-        st.download_button(
+    st.download_button(
             label="Download Comprehensive CSV Report",
             data=csv,
             file_name="zone_furniture_extraction_report.csv",
             mime="text/csv",
             help="Complete report with zones, codes, associations, and totals",
-        )
+    )
 
 
 def main():
