@@ -1,7 +1,9 @@
+import cv2
+
 def load_and_enhance(png_path):
-    # Placeholder
-    return None
+    img = cv2.imread(str(png_path))
+    return _deskew(img)
 
 def _deskew(img):
-    # Placeholder
+    # Basic deskew placeholder
     return img

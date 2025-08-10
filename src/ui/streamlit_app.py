@@ -6,9 +6,10 @@ import time
 
 import pandas as pd
 import streamlit as st
+from pathlib import Path
 
 # Add the workspace to Python path to import enhanced functionality
-sys.path.insert(0, "/workspace")
+#sys.path.insert(0, "/workspace")
 
 # Apply PIL image size fix before importing enhanced functionality
 try:
@@ -20,8 +21,7 @@ except ImportError:
     pass  # PIL might not be available
 
 try:
-    from enhanced_app import EnhancedZoneExtractor
-
+    #from enhanced_app import EnhancedZoneExtractor
     ENHANCED_AVAILABLE = True
 except ImportError:
     ENHANCED_AVAILABLE = False
@@ -51,12 +51,20 @@ if run_btn and uploaded:
             temp_pdf_path = temp_file.name
 
         try:
-            # Initialize enhanced extractor
-            extractor = EnhancedZoneExtractor()
-
             # Process the PDF
             start_time = time.time()
-            results = extractor.process_pdf_enhanced(temp_pdf_path)
+            # Basic processing using available modules
+            from pdf_code_extractor.ocr_codes import detect as detect_codes
+            from pdf_code_extractor.preprocess import load_and_enhance
+            from pdf_code_extractor.raster import pdf_to_pngs
+            import tempfile
+            with tempfile.TemporaryDirectory() as temp_dir:
+                page_pngs = pdf_to_pngs(temp_pdf_path, Path(temp_dir), dpi=300, engine='poppler')
+                codes = []
+                for local_page_num, png_path in page_pngs:
+                    img = load_and_enhance(png_path)
+                    codes.extend(detect_codes(img, local_page_num))
+            results = {"zones": [], "codes": codes, "validation": {}}
             processing_time = time.time() - start_time
 
             # Clean up temp file

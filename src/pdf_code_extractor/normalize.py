@@ -1,3 +1,2 @@
 def apply(assigned_dicts):
-    # Placeholder for normalization
-    return []
+    return assigned_dicts

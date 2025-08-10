@@ -82,7 +82,7 @@ def process_pdfs(
     with (out_dir / "qa_report.json").open("w", encoding="utf-8") as fh:
         json.dump(
             {
-                "spatial": spatial_report.to_dict(),
+                "spatial": spatial_report,
                 "validation": validation_report,
             },
             fh,
@@ -93,7 +93,7 @@ def process_pdfs(
     shutil.rmtree(temp_dir, ignore_errors=True)
 
     return {
-        "spatial": spatial_report.to_dict(),
+        "spatial": spatial_report,
         "validation": validation_report,
     }
 
